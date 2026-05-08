@@ -1,0 +1,8 @@
+[workers]
+script = "../vendor/bin/folk-worker"
+php    = "php"
+count  = 2
+
+[server]
+runtime    = "pipe"
+rpc_socket = "/tmp/folk-test.sock"

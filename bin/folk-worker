@@ -1,0 +1,25 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+if (PHP_MAJOR_VERSION < 8 || (PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION < 2)) {
+    fwrite(STDERR, "folk-worker requires PHP 8.2 or higher\n");
+    exit(1);
+}
+
+if (!extension_loaded('msgpack')) {
+    fwrite(STDERR, "folk-worker requires the 'msgpack' PHP extension\n");
+    exit(1);
+}
+
+$autoload = dirname(__DIR__) . '/vendor/autoload.php';
+if (!file_exists($autoload)) {
+    fwrite(STDERR, "folk-worker: vendor/autoload.php not found. Run 'composer install'.\n");
+    exit(1);
+}
+
+require $autoload;
+
+$loop = new \Folk\Sdk\Worker\WorkerLoop();
+$loop->run();

@@ -1,0 +1,17 @@
+{
+    "name": "folk/sdk",
+    "description": "Universal PHP SDK for Folk application server",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.2",
+        "ext-msgpack": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Folk\\Sdk\\": "src/"
+        }
+    },
+    "bin": ["bin/folk-worker"],
+    "minimum-stability": "stable"
+}

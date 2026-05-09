@@ -1,1 +1,0 @@
-{"version":2,"defects":[],"times":{"Folk\\Sdk\\Tests\\RpcMessageTest::test_request_roundtrip":0,"Folk\\Sdk\\Tests\\RpcMessageTest::test_response_roundtrip":0,"Folk\\Sdk\\Tests\\RpcMessageTest::test_notify_roundtrip":0,"Folk\\Sdk\\Tests\\RpcMessageTest::test_decode_rejects_short_array":0,"Folk\\Sdk\\Tests\\RpcMessageTest::test_decode_rejects_unknown_type":0}}

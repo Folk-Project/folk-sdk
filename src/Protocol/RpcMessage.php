@@ -79,6 +79,7 @@ final class RpcMessage
             self::TYPE_REQUEST  => [$this->type, $this->msgid, $this->method, $this->params],
             self::TYPE_RESPONSE => [$this->type, $this->msgid, $this->error, $this->result],
             self::TYPE_NOTIFY   => [$this->type, $this->method, $this->params],
+            default => throw new ProtocolException("Unknown message type: {$this->type}"),
         };
     }
 
@@ -103,6 +104,7 @@ final class RpcMessage
         };
     }
 
+    /** @param list<mixed> $data */
     private static function decodeRequest(array $data): self
     {
         if (count($data) !== 4) {
@@ -116,6 +118,7 @@ final class RpcMessage
         );
     }
 
+    /** @param list<mixed> $data */
     private static function decodeResponse(array $data): self
     {
         if (count($data) !== 4) {
@@ -129,6 +132,7 @@ final class RpcMessage
         );
     }
 
+    /** @param list<mixed> $data */
     private static function decodeNotify(array $data): self
     {
         if (count($data) !== 3) {

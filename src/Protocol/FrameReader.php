@@ -41,6 +41,9 @@ final class FrameReader
         }
 
         $unpacked = unpack('Nlen', $header);
+        if ($unpacked === false) {
+            throw new ProtocolException('Failed to unpack frame header');
+        }
         $length = $unpacked['len'];
 
         if ($length > self::MAX_FRAME_SIZE) {
@@ -63,7 +66,7 @@ final class FrameReader
             throw new ProtocolException('Frame payload is not a MessagePack array');
         }
 
-        return RpcMessage::decode($data);
+        return RpcMessage::decode(array_values($data));
     }
 
     /**

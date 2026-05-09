@@ -30,7 +30,7 @@ final class WorkerLoop
 
     private ?JobsModeHandler $jobsHandler = null;
 
-    /** @var object[] */
+    /** @var list<object> */
     private array $resetters = [];
 
     public function __construct()
@@ -136,7 +136,9 @@ final class WorkerLoop
     {
         foreach ($this->resetters as $resetter) {
             try {
-                $resetter->reset();
+                if (method_exists($resetter, 'reset')) {
+                    $resetter->reset();
+                }
             } catch (\Throwable $e) {
                 error_log('Folk resetter error: ' . $e->getMessage());
             }
@@ -145,9 +147,9 @@ final class WorkerLoop
 
     private function handleRequest(RpcMessage $request): RpcMessage
     {
-        $method = $request->method;
+        $method = $request->method ?? '';
         $params = $request->params;
-        $msgid  = $request->msgid;
+        $msgid  = $request->msgid ?? 0;
 
         if (!isset($this->handlers[$method])) {
             return RpcMessage::response(

@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: Test
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check PHP version and extensions
+        run: |
+          php --version
+          php -m | grep msgpack || (echo "ERROR: msgpack extension not installed" && exit 1)
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: PHP syntax check
+        run: find src/ -name "*.php" -print0 | xargs -0 -n1 php -l
+
+      - name: PHPUnit
+        run: vendor/bin/phpunit --testdox
+
+      - name: PHPStan
+        run: vendor/bin/phpstan analyse src/ --level=8

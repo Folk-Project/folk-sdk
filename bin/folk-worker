@@ -13,7 +13,11 @@ if (!extension_loaded('msgpack')) {
     exit(1);
 }
 
-$autoload = dirname(__DIR__) . '/vendor/autoload.php';
+// When executed via Composer's bin proxy, autoload path is set globally.
+// When executed directly from the SDK repo, fall back to local vendor/.
+$autoload = $GLOBALS['_composer_autoload_path']
+    ?? dirname(__DIR__) . '/vendor/autoload.php';
+
 if (!file_exists($autoload)) {
     fwrite(STDERR, "folk-worker: vendor/autoload.php not found. Run 'composer install'.\n");
     exit(1);

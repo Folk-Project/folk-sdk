@@ -153,6 +153,16 @@ final class WorkerLoop
         $params = $request->params;
         $msgid  = $request->msgid ?? 0;
 
+        // folk-core sends "dispatch" as the generic method name.
+        // Route to http.handle if registered, otherwise try other handlers.
+        if ($method === 'dispatch' && !isset($this->handlers['dispatch'])) {
+            if (isset($this->handlers['http.handle'])) {
+                $method = 'http.handle';
+            } elseif (isset($this->handlers['jobs.process'])) {
+                $method = 'jobs.process';
+            }
+        }
+
         if (!isset($this->handlers[$method])) {
             return RpcMessage::response(
                 $msgid,

@@ -92,15 +92,8 @@ final class WorkerLoop
             exit(1);
         }
 
-        $task    = @fopen('php://fd/' . $taskFd, 'r+b')
-                   ?: fopen('/dev/fd/' . $taskFd, 'r+b');
-        $control = @fopen('php://fd/' . $controlFd, 'r+b')
-                   ?: fopen('/dev/fd/' . $controlFd, 'r+b');
-
-        if ($task === false || $control === false) {
-            fwrite(STDERR, "folk-worker: failed to open file descriptors\n");
-            exit(1);
-        }
+        $task    = self::openFd($taskFd);
+        $control = self::openFd($controlFd);
 
         stream_set_blocking($task, true);
         stream_set_blocking($control, true);
@@ -145,6 +138,31 @@ final class WorkerLoop
                 error_log('Folk resetter error: ' . $e->getMessage());
             }
         }
+    }
+
+    /**
+     * Open a file descriptor as a PHP stream.
+     *
+     * @return resource
+     */
+    private static function openFd(int $fd)
+    {
+        try {
+            $stream = @fopen('/dev/fd/' . $fd, 'r+b');
+            if ($stream !== false) {
+                return $stream;
+            }
+        } catch (\Throwable) {}
+
+        try {
+            $stream = @fopen('php://fd/' . $fd, 'r+b');
+            if ($stream !== false) {
+                return $stream;
+            }
+        } catch (\Throwable) {}
+
+        fwrite(STDERR, "folk-worker: failed to open fd {$fd}\n");
+        exit(1);
     }
 
     private function handleRequest(RpcMessage $request): RpcMessage

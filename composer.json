@@ -3,6 +3,11 @@
     "description": "Universal PHP SDK for Folk application server",
     "type": "library",
     "license": "MIT",
+    "homepage": "https://github.com/Folk-Project/folk-sdk",
+    "keywords": ["folk", "php", "sdk", "worker"],
+    "authors": [
+        { "name": "Folk Contributors" }
+    ],
     "require": {
         "php": ">=8.2",
         "ext-msgpack": "*"

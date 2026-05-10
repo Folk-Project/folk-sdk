@@ -12,6 +12,13 @@ jobs:
     steps:
       - name: Ping Packagist
         run: |
-          curl -sf -X POST \
+          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" -X POST \
             "https://packagist.org/api/update-package?username=${{ secrets.PACKAGIST_USERNAME }}&apiToken=${{ secrets.PACKAGIST_TOKEN }}" \
-            -d '{"repository":{"url":"https://github.com/Folk-Project/folk-sdk"}}'
+            -H "Content-Type: application/json" \
+            -d '{"repository":{"url":"https://github.com/Folk-Project/folk-sdk"}}')
+          cat /tmp/response.txt
+          echo ""
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "Packagist API returned HTTP $HTTP_CODE"
+            exit 1
+          fi

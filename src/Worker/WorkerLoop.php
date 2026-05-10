@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Folk\Sdk\Worker;
 
+use Folk\Sdk\Grpc\GrpcModeHandler;
+use Folk\Sdk\Grpc\GrpcRequest;
 use Folk\Sdk\Http\HttpModeHandler;
 use Folk\Sdk\Http\HttpRequest;
 use Folk\Sdk\Jobs\JobsModeHandler;
@@ -60,6 +62,14 @@ final class WorkerLoop
                 throw new \RuntimeException('no jobs handler registered');
             }
             return $this->jobsHandler->process($params);
+        });
+    }
+
+    public function registerGrpcHandler(GrpcModeHandler $handler): void
+    {
+        $this->register('grpc.call', function (mixed $params) use ($handler): mixed {
+            $request = GrpcRequest::fromPayload($params);
+            return $handler->call($request->service, $request->method, $request->payload);
         });
     }
 
@@ -178,6 +188,8 @@ final class WorkerLoop
                 $method = 'http.handle';
             } elseif (isset($this->handlers['jobs.process'])) {
                 $method = 'jobs.process';
+            } elseif (isset($this->handlers['grpc.call'])) {
+                $method = 'grpc.call';
             }
         }
 

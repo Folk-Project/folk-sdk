@@ -25,5 +25,20 @@ if (!file_exists($autoload)) {
 
 require $autoload;
 
+// Bootstrap the application framework if available (e.g. Laravel).
+// This triggers service providers which register boot hooks.
+$bootstrap = dirname($autoload, 2) . '/bootstrap/app.php';
+if (file_exists($bootstrap)) {
+    $app = require $bootstrap;
+    $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+}
+
 $loop = new \Folk\Sdk\Worker\WorkerLoop();
+
+// Framework adapters (e.g. folk-laravel) register a boot hook that
+// configures HTTP handlers, resetters, etc.
+if (isset($GLOBALS['folk_worker_boot_hook'])) {
+    ($GLOBALS['folk_worker_boot_hook'])($loop);
+}
+
 $loop->run();

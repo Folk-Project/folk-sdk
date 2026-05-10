@@ -92,8 +92,10 @@ final class WorkerLoop
             exit(1);
         }
 
-        $task    = fopen('php://fd/' . $taskFd, 'r+b');
-        $control = fopen('php://fd/' . $controlFd, 'r+b');
+        $task    = fopen('php://fd/' . $taskFd, 'r+b')
+                   ?: fopen('/dev/fd/' . $taskFd, 'r+b');
+        $control = fopen('php://fd/' . $controlFd, 'r+b')
+                   ?: fopen('/dev/fd/' . $controlFd, 'r+b');
 
         if ($task === false || $control === false) {
             fwrite(STDERR, "folk-worker: failed to open file descriptors\n");

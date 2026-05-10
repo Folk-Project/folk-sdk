@@ -175,13 +175,10 @@ final class ForkMasterLoop
             exit(1);
         }
 
-        // Task channel: import as Socket for SCM_RIGHTS receiving
-        $taskStream = @fopen('php://fd/' . $taskFd, 'r+b')
-                      ?: fopen('/dev/fd/' . $taskFd, 'r+b');
-        if ($taskStream === false) {
-            fwrite(STDERR, "folk-master: failed to open task fd {$taskFd}\n");
-            exit(1);
-        }
+        // Task channel: import as Socket for SCM_RIGHTS receiving.
+        // Try /dev/fd first (works on macOS for sockets), then php://fd.
+        // Must use try/catch because frameworks may convert warnings to exceptions.
+        $taskStream = self::openFd($taskFd);
 
         $this->taskSocket = socket_import_stream($taskStream);
         if ($this->taskSocket === false) {
@@ -190,17 +187,42 @@ final class ForkMasterLoop
         }
 
         // Control channel: standard stream for framed RPC
-        $this->controlStream = @fopen('php://fd/' . $controlFd, 'r+b')
-                               ?: fopen('/dev/fd/' . $controlFd, 'r+b');
-        if ($this->controlStream === false) {
-            fwrite(STDERR, "folk-master: failed to open control fd {$controlFd}\n");
-            exit(1);
-        }
+        $this->controlStream = self::openFd($controlFd);
 
         stream_set_blocking($this->controlStream, true);
 
         $this->controlReader = new FrameReader($this->controlStream);
         $this->controlWriter = new FrameWriter($this->controlStream);
+    }
+
+    /**
+     * Open a file descriptor as a PHP stream.
+     *
+     * Tries /dev/fd/N first (works for sockets on macOS), then php://fd/N.
+     * Uses try/catch because framework error handlers may throw on warnings.
+     *
+     * @return resource
+     */
+    private static function openFd(int $fd)
+    {
+        // Try /dev/fd first — works for Unix sockets on macOS
+        try {
+            $stream = @fopen('/dev/fd/' . $fd, 'r+b');
+            if ($stream !== false) {
+                return $stream;
+            }
+        } catch (\Throwable) {}
+
+        // Fallback to php://fd
+        try {
+            $stream = @fopen('php://fd/' . $fd, 'r+b');
+            if ($stream !== false) {
+                return $stream;
+            }
+        } catch (\Throwable) {}
+
+        fwrite(STDERR, "folk-master: failed to open fd {$fd}\n");
+        exit(1);
     }
 
     private function checkExtensions(): void

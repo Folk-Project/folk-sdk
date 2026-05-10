@@ -33,12 +33,24 @@ if (file_exists($bootstrap)) {
     $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 }
 
-$loop = new \Folk\Sdk\Worker\WorkerLoop();
+$runtime = getenv('FOLK_RUNTIME') ?: 'pipe';
 
-// Framework adapters (e.g. folk-laravel) register a boot hook that
-// configures HTTP handlers, resetters, etc.
-if (isset($GLOBALS['folk_worker_boot_hook'])) {
-    ($GLOBALS['folk_worker_boot_hook'])($loop);
+if ($runtime === 'fork') {
+    // Fork mode: master boots framework, then forks children per worker slot
+    $masterLoop = new \Folk\Sdk\Worker\ForkMasterLoop(
+        masterBootHook: $GLOBALS['folk_master_boot_hook'] ?? null,
+        workerBootHook: $GLOBALS['folk_worker_boot_hook'] ?? null,
+    );
+    $masterLoop->run();
+} else {
+    // Pipe mode: single worker process
+    $loop = new \Folk\Sdk\Worker\WorkerLoop();
+
+    // Framework adapters (e.g. folk-laravel) register a boot hook that
+    // configures HTTP handlers, resetters, etc.
+    if (isset($GLOBALS['folk_worker_boot_hook'])) {
+        ($GLOBALS['folk_worker_boot_hook'])($loop);
+    }
+
+    $loop->run();
 }
-
-$loop->run();

@@ -19,6 +19,10 @@
     },
     "bin": ["bin/folk-worker"],
     "minimum-stability": "stable",
+    "suggest": {
+        "ext-pcntl": "Required for fork runtime mode (pcntl_fork, pcntl_waitpid)",
+        "ext-sockets": "Required for fork runtime mode (SCM_RIGHTS fd passing)"
+    },
     "require-dev": {
         "phpunit/phpunit": "^13.1",
         "phpstan/phpstan": "^2.1"

@@ -18,9 +18,9 @@ use Folk\Sdk\Protocol\ScmRights;
  */
 final class ForkMasterLoop
 {
-    private ?FrameReader $controlReader;
-    private ?FrameWriter $controlWriter;
-    private ?\Socket $taskSocket;
+    private FrameReader $controlReader;
+    private FrameWriter $controlWriter;
+    private \Socket $taskSocket;
 
     /** @var resource|null */
     private $controlStream;
@@ -76,6 +76,7 @@ final class ForkMasterLoop
         while ($running) {
             pcntl_signal_dispatch();
 
+            /** @phpstan-ignore booleanNot.alwaysFalse (SIGTERM handler sets $running=false) */
             if (!$running) {
                 break;
             }
@@ -176,15 +177,14 @@ final class ForkMasterLoop
         }
 
         // Task channel: import as Socket for SCM_RIGHTS receiving.
-        // Try /dev/fd first (works on macOS for sockets), then php://fd.
-        // Must use try/catch because frameworks may convert warnings to exceptions.
         $taskStream = self::openFd($taskFd);
 
-        $this->taskSocket = socket_import_stream($taskStream);
-        if ($this->taskSocket === false) {
+        $taskSocket = socket_import_stream($taskStream);
+        if ($taskSocket === false) {
             fwrite(STDERR, "folk-master: socket_import_stream failed for task fd\n");
             exit(1);
         }
+        $this->taskSocket = $taskSocket;
 
         // Control channel: standard stream for framed RPC
         $this->controlStream = self::openFd($controlFd);

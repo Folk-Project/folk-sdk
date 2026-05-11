@@ -69,7 +69,7 @@ final class WorkerLoop
     {
         $this->register('grpc.call', function (mixed $params) use ($handler): mixed {
             $request = GrpcRequest::fromPayload($params);
-            return $handler->call($request->service, $request->method, $request->payload);
+            return $handler->call($request->service, $request->method, $request->payload, $request->context);
         });
     }
 

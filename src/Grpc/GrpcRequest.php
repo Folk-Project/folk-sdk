@@ -10,6 +10,7 @@ final readonly class GrpcRequest
         public string $service,
         public string $method,
         public string $payload,
+        public Context $context,
     ) {}
 
     public static function fromPayload(mixed $payload): self
@@ -20,10 +21,16 @@ final readonly class GrpcRequest
             $raw = pack('C*', ...$raw);
         }
 
+        $metadata = [];
+        if (isset($payload['metadata']) && is_array($payload['metadata'])) {
+            $metadata = $payload['metadata'];
+        }
+
         return new self(
             service: $payload['service'] ?? '',
             method: $payload['method'] ?? '',
             payload: (string) $raw,
+            context: new Context($metadata),
         );
     }
 }

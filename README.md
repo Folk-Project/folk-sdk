@@ -1,14 +1,13 @@
 # folk-sdk
 
-PHP SDK for Folk — universal worker entry point, MessagePack-RPC protocol, and handler registration.
-
-> **Status:** in active development. See [folk-spec](https://github.com/Folk-Project/folk-spec) for the roadmap.
+PHP SDK for Folk — worker entry point, handler registration, RPC client, and protocol implementation.
 
 ## Requirements
 
 - PHP 8.2+
 - `ext-msgpack` — MessagePack serialization
-- `ext-pcntl` — required for fork runtime mode only
+- `ext-pcntl` — fork runtime mode only
+- `ext-sockets` — fork runtime mode only
 
 ## Installation
 
@@ -18,11 +17,8 @@ composer require folk/sdk
 
 ## Quick start
 
-The SDK installs `vendor/bin/folk-worker` as the default worker entry point. For custom handlers, create your own script:
-
 ```php
 <?php
-// worker.php
 require __DIR__ . '/vendor/autoload.php';
 
 use Folk\Sdk\Worker\WorkerLoop;
@@ -34,11 +30,11 @@ class MyHandler implements HttpModeHandler
 {
     public function handle(HttpRequest $request): HttpResponse
     {
-        $response = new HttpResponse();
-        $response->status = 200;
-        $response->headers = ['Content-Type' => 'application/json'];
-        $response->body = json_encode(['uri' => $request->uri, 'method' => $request->method]);
-        return $response;
+        return new HttpResponse(
+            status: 200,
+            headers: ['Content-Type' => 'application/json'],
+            body: json_encode(['uri' => $request->uri]),
+        );
     }
 }
 
@@ -54,88 +50,150 @@ Point `folk.toml` at your script:
 script = "worker.php"
 ```
 
-## WorkerLoop
+## Handler registration
 
-`Folk\Sdk\Worker\WorkerLoop` is the main class. It reads tasks from the Rust server over a length-prefixed MessagePack-RPC channel and dispatches them to registered handlers.
-
-### Methods
-
-**`register(string $method, callable $handler): void`**
-
-Register a raw RPC method handler. The callable receives `mixed $params` and returns `mixed`.
+### HTTP
 
 ```php
-$loop->register('ping', function (mixed $params): string {
-    return 'pong';
-});
-```
+use Folk\Sdk\Http\HttpModeHandler;
+use Folk\Sdk\Http\HttpRequest;
+use Folk\Sdk\Http\HttpResponse;
 
-**`registerHttpHandler(HttpModeHandler $handler): void`**
+class MyHttpHandler implements HttpModeHandler
+{
+    public function handle(HttpRequest $request): HttpResponse
+    {
+        return new HttpResponse(200, [], "Hello from {$request->uri}");
+    }
+}
 
-Register an HTTP request handler. Automatically binds to the `http.handle` RPC method. The handler receives an `HttpRequest` and returns an `HttpResponse`.
-
-```php
 $loop->registerHttpHandler(new MyHttpHandler());
 ```
 
-**`registerJobsHandler(JobsModeHandler $handler): void`**
+`HttpRequest` fields: `method`, `uri`, `headers`, `body`
+`HttpResponse` fields: `status`, `headers`, `body`
 
-Register a background jobs handler. Automatically binds to the `jobs.process` RPC method. The handler receives `mixed $payload` and returns `mixed`.
-
-```php
-$loop->registerJobsHandler(new MyJobsHandler());
-```
-
-**`registerResetter(object $resetter): void`**
-
-Register an object whose `reset()` method is called after each request. Used to clean up shared state between requests in long-lived workers.
+### Jobs
 
 ```php
-$loop->registerResetter($myStatefulService);
+use Folk\Sdk\Jobs\JobsModeHandler;
+
+class MyJobHandler implements JobsModeHandler
+{
+    public function process(mixed $payload): mixed
+    {
+        $data = json_decode($payload, true);
+        // Process the job...
+        return ['status' => 'ok'];
+    }
+}
+
+$loop->registerJobsHandler(new MyJobHandler());
 ```
 
-**`run(): void`**
+The handler receives the raw payload string that was pushed to the queue. Parse it however you need (JSON, msgpack, etc.).
 
-Start the worker loop. Blocks until the server signals shutdown. Reads from file descriptors specified by `FOLK_TASK_FD` and `FOLK_CONTROL_FD` environment variables.
+### gRPC
 
-## Handler interfaces
+Two styles available — raw bytes or typed protobuf.
 
-**`HttpModeHandler`** — `handle(HttpRequest $request): HttpResponse`
+**Raw bytes mode:**
 
-**`JobsModeHandler`** — `process(mixed $payload): mixed`
+```php
+use Folk\Sdk\Grpc\GrpcModeHandler;
+use Folk\Sdk\Grpc\Context;
 
-## Data classes
+class MyGrpcHandler implements GrpcModeHandler
+{
+    public function call(string $service, string $method, string $payload, Context $context): string
+    {
+        $token = $context->getValue('authorization');
 
-**`HttpRequest`** (readonly):
-- `string $method` — HTTP method (GET, POST, etc.)
-- `string $uri` — Request URI with query string
-- `array $headers` — Header map (string => string)
-- `string $body` — Request body
+        $request = new \MyProto\MyRequest();
+        $request->mergeFromString($payload);
 
-**`HttpResponse`**:
-- `int $status` — HTTP status code (default: 200)
-- `array $headers` — Response headers (default: [])
-- `string $body` — Response body (default: '')
+        $reply = new \MyProto\MyReply();
+        $reply->setResult("processed");
 
-## How it works
+        return $reply->serializeToString();
+    }
+}
 
-The worker process communicates with the Rust server over two file descriptors:
-
-- **FD 3 (task channel)** — receives RPC requests, sends responses
-- **FD 4 (control channel)** — sends `control.ready` at boot, receives shutdown signal
-
-Messages use a length-prefixed MessagePack-RPC wire format:
-
-```
-[4-byte big-endian length][MessagePack payload]
+$loop->registerGrpcHandler(new MyGrpcHandler());
 ```
 
-Message types follow MessagePack-RPC:
+For typed protobuf mode with auto-detection, see [folk-laravel](https://github.com/Folk-Project/folk-laravel) integration.
+
+### Resetters
+
+Objects whose `reset()` method is called between requests to clean up shared state:
+
+```php
+$loop->registerResetter($myDbConnection);
+$loop->registerResetter($myAuthState);
+```
+
+### Custom RPC methods
+
+```php
+$loop->register('my.custom', function (mixed $params): mixed {
+    return ['echo' => $params];
+});
+```
+
+## RPC Client
+
+The SDK includes an RPC client for calling Folk's admin socket:
+
+```php
+use Folk\Sdk\Rpc\RpcClient;
+
+$rpc = new RpcClient('./tmp/folk.sock');
+
+// Push a job
+$rpc->call('jobs.push', [
+    'queue' => 'default',
+    'payload' => json_encode(['task' => 'send-email']),
+]);
+
+// Get queue stats
+$stats = $rpc->call('jobs.stats');
+```
+
+The RPC client communicates over a Unix socket using the same MessagePack-RPC protocol as the worker channels. Use it to interact with Folk from any PHP context (CLI scripts, HTTP handlers, cron jobs, etc.).
+
+## Fork mode
+
+For applications with heavy boot (frameworks, many service providers), fork mode boots the framework once in a master process. Workers are forked from the warm master — no cold start per worker.
+
+```toml
+# folk.toml
+[server]
+runtime = "fork"
+```
+
+Requirements: `ext-pcntl`, `ext-sockets`.
+
+The SDK automatically detects `FOLK_RUNTIME=fork` and uses `ForkMasterLoop` instead of `WorkerLoop`. The master:
+
+1. Boots the application framework (warm OPcache)
+2. Sends `control.fork-ready`
+3. Receives socket file descriptors via SCM_RIGHTS for each worker
+4. Forks children that enter the standard `WorkerLoop`
+
+## Protocol
+
+Workers communicate with the Rust server over two file descriptors:
+
+- **FD 3 (task channel)** — RPC requests and responses
+- **FD 4 (control channel)** — lifecycle signals (`control.ready`, `control.shutdown`)
+
+Wire format: `[4-byte BE length][MessagePack payload]`
+
+Message types (MessagePack-RPC):
 - Request: `[0, msgid, method, params]`
 - Response: `[1, msgid, error, result]`
 - Notify: `[2, method, params]`
-
-On startup, the worker sends a `control.ready` notification with its PID. The server then begins dispatching tasks. After each task, registered resetters run to clean up state.
 
 ## License
 

@@ -14,10 +14,16 @@ final readonly class GrpcRequest
 
     public static function fromPayload(mixed $payload): self
     {
+        $raw = $payload['payload'] ?? '';
+        // MessagePack binary may arrive as array of integers
+        if (is_array($raw)) {
+            $raw = pack('C*', ...$raw);
+        }
+
         return new self(
             service: $payload['service'] ?? '',
             method: $payload['method'] ?? '',
-            payload: $payload['payload'] ?? '',
+            payload: (string) $raw,
         );
     }
 }

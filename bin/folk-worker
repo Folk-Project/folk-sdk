@@ -42,12 +42,20 @@ if ($runtime === 'fork') {
         workerBootHook: $GLOBALS['folk_worker_boot_hook'] ?? null,
     );
     $masterLoop->run();
+} elseif ($runtime === 'embed') {
+    // Embed mode: Rust drives the request loop via FFI.
+    // run() registers a callback and returns immediately.
+    $loop = new \Folk\Sdk\Worker\EmbedLoop();
+
+    if (isset($GLOBALS['folk_worker_boot_hook'])) {
+        ($GLOBALS['folk_worker_boot_hook'])($loop);
+    }
+
+    $loop->run();
 } else {
     // Pipe mode: single worker process
     $loop = new \Folk\Sdk\Worker\WorkerLoop();
 
-    // Framework adapters (e.g. folk-laravel) register a boot hook that
-    // configures HTTP handlers, resetters, etc.
     if (isset($GLOBALS['folk_worker_boot_hook'])) {
         ($GLOBALS['folk_worker_boot_hook'])($loop);
     }

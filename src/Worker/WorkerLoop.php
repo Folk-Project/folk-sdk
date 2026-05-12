@@ -23,7 +23,7 @@ use Folk\Sdk\Protocol\RpcMessage;
  * Phase 5: only the 'echo' method is registered.
  * Phases 6+: HTTP, Jobs, gRPC handlers will be registered via the hook system.
  */
-final class WorkerLoop
+final class WorkerLoop implements HandlerLoop
 {
     /** @var array<string, callable(mixed): mixed> */
     private array $handlers = [];

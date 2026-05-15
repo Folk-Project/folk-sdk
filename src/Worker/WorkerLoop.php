@@ -14,14 +14,10 @@ use Folk\Sdk\Protocol\FrameWriter;
 use Folk\Sdk\Protocol\RpcMessage;
 
 /**
- * Minimal pipe-mode worker loop.
+ * Worker dispatch loop.
  *
- * Reads FOLK_TASK_FD and FOLK_CONTROL_FD from the environment,
- * sends control.ready on the control channel, then dispatches
- * task-channel requests in a loop until control.shutdown is received.
- *
- * Phase 5: only the 'echo' method is registered.
- * Phases 6+: HTTP, Jobs, gRPC handlers will be registered via the hook system.
+ * In extension mode (folk.so loaded), communicates via folk_worker_recv/send.
+ * In pipe mode (legacy), reads/writes FD 3/4 with msgpack-RPC framing.
  */
 final class WorkerLoop implements HandlerLoop
 {
@@ -37,7 +33,6 @@ final class WorkerLoop implements HandlerLoop
 
     public function __construct()
     {
-        // Register built-in handlers.
         $this->handlers['echo'] = static fn(mixed $params): mixed => $params;
     }
 
@@ -80,9 +75,6 @@ final class WorkerLoop implements HandlerLoop
 
     /**
      * Register a handler for an RPC method.
-     *
-     * @param string $method Method name (e.g. 'http.handle')
-     * @param callable(mixed): mixed $handler Called with $params, returns $result
      */
     public function register(string $method, callable $handler): void
     {
@@ -90,9 +82,53 @@ final class WorkerLoop implements HandlerLoop
     }
 
     /**
-     * Run the worker loop until shutdown is signaled.
+     * Run the worker loop until shutdown.
+     *
+     * Detects extension mode automatically.
      */
     public function run(): void
+    {
+        if (function_exists('folk_worker_recv')) {
+            $this->runExtension();
+        } else {
+            $this->runPipe();
+        }
+    }
+
+    /**
+     * Extension mode: communicate via folk_worker_recv/send (channels, zero IPC).
+     */
+    private function runExtension(): void
+    {
+        // Signal ready.
+        \folk_worker_ready();
+
+        // Main dispatch loop.
+        while (true) {
+            $msg = \folk_worker_recv();
+            if ($msg === null) {
+                break; // shutdown
+            }
+
+            [$method, $paramsBin] = $msg;
+            $params = \msgpack_unpack($paramsBin);
+
+            $result = $this->dispatch($method, $params);
+
+            if ($result['error'] !== null) {
+                \folk_worker_send_error($result['error']);
+            } else {
+                \folk_worker_send(\msgpack_pack($result['result']));
+            }
+
+            $this->runResetters();
+        }
+    }
+
+    /**
+     * Pipe mode (legacy): communicate via FD 3/4 with msgpack-RPC framing.
+     */
+    private function runPipe(): void
     {
         $taskFd    = (int) getenv('FOLK_TASK_FD');
         $controlFd = (int) getenv('FOLK_CONTROL_FD');
@@ -112,19 +148,15 @@ final class WorkerLoop implements HandlerLoop
         $taskWriter    = new FrameWriter($task);
         $controlWriter = new FrameWriter($control);
 
-        // Send control.ready.
         $controlWriter->write(RpcMessage::notify('control.ready', ['pid' => getmypid()]));
 
-        // Main dispatch loop.
         while (true) {
             $taskMsg = $taskReader->read();
             if ($taskMsg === null) {
-                // EOF on task channel: server closed the socket. Exit cleanly.
                 break;
             }
 
             if ($taskMsg->type !== RpcMessage::TYPE_REQUEST) {
-                // Ignore non-request frames (shouldn't happen in normal operation).
                 continue;
             }
 
@@ -135,6 +167,36 @@ final class WorkerLoop implements HandlerLoop
 
         fclose($task);
         fclose($control);
+    }
+
+    /**
+     * Dispatch a request to the appropriate handler.
+     *
+     * @return array{error: ?string, result: mixed}
+     */
+    private function dispatch(string $method, mixed $params): array
+    {
+        // Auto-route 'dispatch' to registered handlers.
+        if ($method === 'dispatch' && !isset($this->handlers['dispatch'])) {
+            if (isset($this->handlers['http.handle'])) {
+                $method = 'http.handle';
+            } elseif (isset($this->handlers['jobs.process'])) {
+                $method = 'jobs.process';
+            } elseif (isset($this->handlers['grpc.call'])) {
+                $method = 'grpc.call';
+            }
+        }
+
+        if (!isset($this->handlers[$method])) {
+            return ['error' => "method not found: {$method}", 'result' => null];
+        }
+
+        try {
+            $result = ($this->handlers[$method])($params);
+            return ['error' => null, 'result' => $result];
+        } catch (\Throwable $e) {
+            return ['error' => $e->getMessage(), 'result' => null];
+        }
     }
 
     private function runResetters(): void
@@ -151,8 +213,6 @@ final class WorkerLoop implements HandlerLoop
     }
 
     /**
-     * Open a file descriptor as a PHP stream.
-     *
      * @return resource
      */
     private static function openFd(int $fd)
@@ -181,35 +241,16 @@ final class WorkerLoop implements HandlerLoop
         $params = $request->params;
         $msgid  = $request->msgid ?? 0;
 
-        // folk-core sends "dispatch" as the generic method name.
-        // Route to http.handle if registered, otherwise try other handlers.
-        if ($method === 'dispatch' && !isset($this->handlers['dispatch'])) {
-            if (isset($this->handlers['http.handle'])) {
-                $method = 'http.handle';
-            } elseif (isset($this->handlers['jobs.process'])) {
-                $method = 'jobs.process';
-            } elseif (isset($this->handlers['grpc.call'])) {
-                $method = 'grpc.call';
-            }
-        }
+        $result = $this->dispatch($method, $params);
 
-        if (!isset($this->handlers[$method])) {
+        if ($result['error'] !== null) {
             return RpcMessage::response(
                 $msgid,
-                ['code' => -32601, 'message' => "method not found: {$method}"],
+                ['code' => -32603, 'message' => $result['error']],
                 null
             );
         }
 
-        try {
-            $result = ($this->handlers[$method])($params);
-            return RpcMessage::response($msgid, null, $result);
-        } catch (\Throwable $e) {
-            return RpcMessage::response(
-                $msgid,
-                ['code' => -32603, 'message' => $e->getMessage()],
-                null
-            );
-        }
+        return RpcMessage::response($msgid, null, $result['result']);
     }
 }

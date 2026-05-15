@@ -8,11 +8,6 @@ if (PHP_MAJOR_VERSION < 8 || (PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION < 2))
     exit(1);
 }
 
-if (!extension_loaded('msgpack')) {
-    fwrite(STDERR, "folk-worker requires the 'msgpack' PHP extension\n");
-    exit(1);
-}
-
 // When executed via Composer's bin proxy, autoload path is set globally.
 // When executed directly from the SDK repo, fall back to local vendor/.
 $autoload = $GLOBALS['_composer_autoload_path']
@@ -33,32 +28,13 @@ if (file_exists($bootstrap)) {
     $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 }
 
-$runtime = getenv('FOLK_RUNTIME') ?: 'pipe';
+// Create the worker loop (auto-detects extension vs pipe mode).
+$loop = new \Folk\Sdk\Worker\WorkerLoop();
 
-if ($runtime === 'fork') {
-    // Fork mode: master boots framework, then forks children per worker slot
-    $masterLoop = new \Folk\Sdk\Worker\ForkMasterLoop(
-        masterBootHook: $GLOBALS['folk_master_boot_hook'] ?? null,
-        workerBootHook: $GLOBALS['folk_worker_boot_hook'] ?? null,
-    );
-    $masterLoop->run();
-} elseif ($runtime === 'embed') {
-    // Embed mode: Rust drives the request loop via FFI.
-    // run() registers a callback and returns immediately.
-    $loop = new \Folk\Sdk\Worker\EmbedLoop();
-
-    if (isset($GLOBALS['folk_worker_boot_hook'])) {
-        ($GLOBALS['folk_worker_boot_hook'])($loop);
-    }
-
-    $loop->run();
-} else {
-    // Pipe mode: single worker process
-    $loop = new \Folk\Sdk\Worker\WorkerLoop();
-
-    if (isset($GLOBALS['folk_worker_boot_hook'])) {
-        ($GLOBALS['folk_worker_boot_hook'])($loop);
-    }
-
-    $loop->run();
+// Framework adapters (e.g. folk-laravel) register a boot hook that
+// configures HTTP handlers, resetters, etc.
+if (isset($GLOBALS['folk_worker_boot_hook'])) {
+    ($GLOBALS['folk_worker_boot_hook'])($loop);
 }
+
+$loop->run();

@@ -111,14 +111,14 @@ final class WorkerLoop implements HandlerLoop
             }
 
             [$method, $paramsBin] = $msg;
-            $params = \msgpack_unpack($paramsBin);
+            $params = \json_decode($paramsBin, true);
 
             $result = $this->dispatch($method, $params);
 
             if ($result['error'] !== null) {
                 \folk_worker_send_error($result['error']);
             } else {
-                \folk_worker_send(\msgpack_pack($result['result']));
+                \folk_worker_send(\json_encode($result['result']));
             }
 
             $this->runResetters();

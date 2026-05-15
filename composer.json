@@ -10,7 +10,7 @@
     ],
     "require": {
         "php": ">=8.2",
-        "ext-msgpack": "*"
+        "ext-json": "*"
     },
     "autoload": {
         "psr-4": {

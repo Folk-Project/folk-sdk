@@ -88,7 +88,9 @@ final class WorkerLoop implements HandlerLoop
      */
     public function run(): void
     {
-        if (function_exists('folk_worker_recv')) {
+        if (function_exists('folk_worker_run')) {
+            $this->runDirect();
+        } elseif (function_exists('folk_worker_recv')) {
             $this->runExtension();
         } else {
             $this->runPipe();
@@ -96,7 +98,23 @@ final class WorkerLoop implements HandlerLoop
     }
 
     /**
-     * Extension mode: communicate via folk_worker_recv/send (channels, zero IPC).
+     * Direct dispatch: Rust calls PHP handler directly via call_user_function.
+     * Zero JSON encode/decode — data passes as zval arrays.
+     */
+    private function runDirect(): void
+    {
+        // Store this instance for the global dispatch function.
+        $GLOBALS['__folk_worker_loop'] = $this;
+
+        // Load the global dispatch function that Rust will call.
+        require_once __DIR__ . '/dispatch_fn.php';
+
+        // folk_worker_run blocks, calling __folk_dispatch for each request.
+        \folk_worker_run('__folk_dispatch');
+    }
+
+    /**
+     * Extension mode (legacy): communicate via folk_worker_recv/send.
      */
     private function runExtension(): void
     {
@@ -167,6 +185,21 @@ final class WorkerLoop implements HandlerLoop
 
         fclose($task);
         fclose($control);
+    }
+
+    /**
+     * Direct dispatch for the zero-copy path (called from __folk_dispatch).
+     *
+     * Returns the handler result directly. On error, returns ['__error' => message].
+     */
+    public function dispatchDirect(string $method, array $params): array
+    {
+        $result = $this->dispatch($method, $params);
+        if ($result['error'] !== null) {
+            return ['__error' => $result['error']];
+        }
+        $this->runResetters();
+        return is_array($result['result']) ? $result['result'] : ['__result' => $result['result']];
     }
 
     /**

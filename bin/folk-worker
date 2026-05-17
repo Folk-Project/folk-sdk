@@ -1,7 +1,4 @@
-#!/usr/bin/env php
 <?php
-
-declare(strict_types=1);
 
 if (PHP_MAJOR_VERSION < 8 || (PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION < 2)) {
     fwrite(STDERR, "folk-worker requires PHP 8.2 or higher\n");

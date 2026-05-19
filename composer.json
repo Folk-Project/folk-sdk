@@ -20,6 +20,7 @@
     "bin": ["bin/folk-worker"],
     "minimum-stability": "stable",
     "suggest": {
+        "ext-folk": "Folk PHP extension — install via: pie install folk-project/ext-folk",
         "ext-pcntl": "Required for fork runtime mode (pcntl_fork, pcntl_waitpid)",
         "ext-sockets": "Required for fork runtime mode (SCM_RIGHTS fd passing)"
     },

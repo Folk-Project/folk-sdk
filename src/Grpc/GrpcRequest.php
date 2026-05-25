@@ -16,8 +16,14 @@ final readonly class GrpcRequest
     public static function fromPayload(mixed $payload): self
     {
         $raw = $payload['payload'] ?? '';
-        // MessagePack binary may arrive as array of integers
-        if (is_array($raw)) {
+        // Base64-encoded protobuf bytes from Rust
+        if (is_string($raw)) {
+            $decoded = base64_decode($raw, true);
+            if ($decoded !== false) {
+                $raw = $decoded;
+            }
+        } elseif (is_array($raw)) {
+            // Fallback: array of integers
             $raw = pack('C*', ...$raw);
         }
 

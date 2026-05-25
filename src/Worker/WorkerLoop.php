@@ -64,7 +64,8 @@ final class WorkerLoop implements HandlerLoop
     {
         $this->register('grpc.call', function (mixed $params) use ($handler): mixed {
             $request = GrpcRequest::fromPayload($params);
-            return $handler->call($request->service, $request->method, $request->payload, $request->context);
+            $response = $handler->call($request->service, $request->method, $request->payload, $request->context);
+            return base64_encode($response);
         });
     }
 

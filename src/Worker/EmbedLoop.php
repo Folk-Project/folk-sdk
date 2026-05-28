@@ -9,6 +9,7 @@ use Folk\Sdk\Grpc\GrpcRequest;
 use Folk\Sdk\Http\HttpModeHandler;
 use Folk\Sdk\Http\HttpRequest;
 use Folk\Sdk\Jobs\JobsModeHandler;
+use Folk\Sdk\Reset\ResettableInterface;
 
 /**
  * Embed-mode worker loop.
@@ -35,7 +36,7 @@ final class EmbedLoop implements HandlerLoop
 
     private ?JobsModeHandler $jobsHandler = null;
 
-    /** @var list<object> */
+    /** @var list<ResettableInterface> */
     private array $resetters = [];
 
     public function __construct()
@@ -76,7 +77,7 @@ final class EmbedLoop implements HandlerLoop
         });
     }
 
-    public function registerResetter(object $resetter): void
+    public function registerResetter(ResettableInterface $resetter): void
     {
         $this->resetters[] = $resetter;
     }
@@ -166,9 +167,7 @@ final class EmbedLoop implements HandlerLoop
     {
         foreach ($this->resetters as $resetter) {
             try {
-                if (method_exists($resetter, 'reset')) {
-                    $resetter->reset();
-                }
+                $resetter->reset();
             } catch (\Throwable $e) {
                 error_log('Folk resetter error: ' . $e->getMessage());
             }

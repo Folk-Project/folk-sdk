@@ -9,15 +9,12 @@ use Folk\Sdk\Grpc\GrpcRequest;
 use Folk\Sdk\Http\HttpModeHandler;
 use Folk\Sdk\Http\HttpRequest;
 use Folk\Sdk\Jobs\JobsModeHandler;
-use Folk\Sdk\Protocol\FrameReader;
-use Folk\Sdk\Protocol\FrameWriter;
-use Folk\Sdk\Protocol\RpcMessage;
+use Folk\Sdk\Reset\ResettableInterface;
 
 /**
  * Worker dispatch loop.
  *
- * In extension mode (folk.so loaded), communicates via folk_worker_recv/send.
- * In pipe mode (legacy), reads/writes FD 3/4 with msgpack-RPC framing.
+ * Communicates with Rust via folk_worker_run() — zero-copy direct dispatch.
  */
 final class WorkerLoop implements HandlerLoop
 {
@@ -28,7 +25,7 @@ final class WorkerLoop implements HandlerLoop
 
     private ?JobsModeHandler $jobsHandler = null;
 
-    /** @var list<object> */
+    /** @var list<ResettableInterface> */
     private array $resetters = [];
 
     public function __construct()
@@ -69,123 +66,21 @@ final class WorkerLoop implements HandlerLoop
         });
     }
 
-    public function registerResetter(object $resetter): void
+    public function registerResetter(ResettableInterface $resetter): void
     {
         $this->resetters[] = $resetter;
     }
 
-    /**
-     * Register a handler for an RPC method.
-     */
     public function register(string $method, callable $handler): void
     {
         $this->handlers[$method] = $handler;
     }
 
-    /**
-     * Run the worker loop until shutdown.
-     *
-     * Detects extension mode automatically.
-     */
     public function run(): void
     {
-        if (function_exists('folk_worker_run')) {
-            $this->runDirect();
-        } elseif (function_exists('folk_worker_recv')) {
-            $this->runExtension();
-        } else {
-            $this->runPipe();
-        }
-    }
-
-    /**
-     * Direct dispatch: Rust calls PHP handler directly via call_user_function.
-     * Zero JSON encode/decode — data passes as zval arrays.
-     */
-    private function runDirect(): void
-    {
-        // Store this instance for the global dispatch function.
         $GLOBALS['__folk_worker_loop'] = $this;
-
-        // Load the global dispatch function that Rust will call.
         require_once __DIR__ . '/dispatch_fn.php';
-
-        // folk_worker_run blocks, calling __folk_dispatch for each request.
         \folk_worker_run('__folk_dispatch');
-    }
-
-    /**
-     * Extension mode (legacy): communicate via folk_worker_recv/send.
-     */
-    private function runExtension(): void
-    {
-        // Signal ready.
-        \folk_worker_ready();
-
-        // Main dispatch loop.
-        while (true) {
-            $msg = \folk_worker_recv();
-            if ($msg === null) {
-                break; // shutdown
-            }
-
-            [$method, $paramsBin] = $msg;
-            $params = \json_decode($paramsBin, true);
-
-            $result = $this->dispatch($method, $params);
-
-            if ($result['error'] !== null) {
-                \folk_worker_send_error($result['error']);
-            } else {
-                \folk_worker_send(\json_encode($result['result']));
-            }
-
-            $this->runResetters();
-        }
-    }
-
-    /**
-     * Pipe mode (legacy): communicate via FD 3/4 with msgpack-RPC framing.
-     */
-    private function runPipe(): void
-    {
-        $taskFd    = (int) getenv('FOLK_TASK_FD');
-        $controlFd = (int) getenv('FOLK_CONTROL_FD');
-
-        if ($taskFd === 0 || $controlFd === 0) {
-            fwrite(STDERR, "folk-worker: FOLK_TASK_FD or FOLK_CONTROL_FD not set\n");
-            exit(1);
-        }
-
-        $task    = self::openFd($taskFd);
-        $control = self::openFd($controlFd);
-
-        stream_set_blocking($task, true);
-        stream_set_blocking($control, true);
-
-        $taskReader    = new FrameReader($task);
-        $taskWriter    = new FrameWriter($task);
-        $controlWriter = new FrameWriter($control);
-
-        $controlWriter->write(RpcMessage::notify('control.ready', ['pid' => getmypid()]));
-
-        while (true) {
-            $taskMsg = $taskReader->read();
-            if ($taskMsg === null) {
-                break;
-            }
-
-            if ($taskMsg->type !== RpcMessage::TYPE_REQUEST) {
-                continue;
-            }
-
-            $response = $this->handleRequest($taskMsg);
-            $taskWriter->write($response);
-            $this->runResetters();
-        }
-
-        fclose($task);
-        fclose($control);
     }
 
     /**
@@ -204,13 +99,10 @@ final class WorkerLoop implements HandlerLoop
     }
 
     /**
-     * Dispatch a request to the appropriate handler.
-     *
      * @return array{error: ?string, result: mixed}
      */
     private function dispatch(string $method, mixed $params): array
     {
-        // Auto-route 'dispatch' to registered handlers.
         if ($method === 'dispatch' && !isset($this->handlers['dispatch'])) {
             if (isset($this->handlers['http.handle'])) {
                 $method = 'http.handle';
@@ -237,54 +129,10 @@ final class WorkerLoop implements HandlerLoop
     {
         foreach ($this->resetters as $resetter) {
             try {
-                if (method_exists($resetter, 'reset')) {
-                    $resetter->reset();
-                }
+                $resetter->reset();
             } catch (\Throwable $e) {
                 error_log('Folk resetter error: ' . $e->getMessage());
             }
         }
-    }
-
-    /**
-     * @return resource
-     */
-    private static function openFd(int $fd)
-    {
-        try {
-            $stream = @fopen('/dev/fd/' . $fd, 'r+b');
-            if ($stream !== false) {
-                return $stream;
-            }
-        } catch (\Throwable) {}
-
-        try {
-            $stream = @fopen('php://fd/' . $fd, 'r+b');
-            if ($stream !== false) {
-                return $stream;
-            }
-        } catch (\Throwable) {}
-
-        fwrite(STDERR, "folk-worker: failed to open fd {$fd}\n");
-        exit(1);
-    }
-
-    private function handleRequest(RpcMessage $request): RpcMessage
-    {
-        $method = $request->method ?? '';
-        $params = $request->params;
-        $msgid  = $request->msgid ?? 0;
-
-        $result = $this->dispatch($method, $params);
-
-        if ($result['error'] !== null) {
-            return RpcMessage::response(
-                $msgid,
-                ['code' => -32603, 'message' => $result['error']],
-                null
-            );
-        }
-
-        return RpcMessage::response($msgid, null, $result['result']);
     }
 }

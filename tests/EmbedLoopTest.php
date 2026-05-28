@@ -6,6 +6,7 @@ use Folk\Sdk\Http\HttpModeHandler;
 use Folk\Sdk\Http\HttpRequest;
 use Folk\Sdk\Http\HttpResponse;
 use Folk\Sdk\Jobs\JobsModeHandler;
+use Folk\Sdk\Reset\ResettableInterface;
 use Folk\Sdk\Worker\EmbedLoop;
 use Folk\Sdk\Worker\HandlerLoop;
 use PHPUnit\Framework\TestCase;
@@ -122,7 +123,7 @@ final class EmbedLoopTest extends TestCase
 
     public function testResettersCalled(): void
     {
-        $counter = new class {
+        $counter = new class implements ResettableInterface {
             public int $count = 0;
             public function reset(): void
             {

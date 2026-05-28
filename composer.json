@@ -21,8 +21,7 @@
     "minimum-stability": "stable",
     "suggest": {
         "ext-folk": "Folk PHP extension — install via: pie install folk-project/ext-folk",
-        "ext-pcntl": "Required for fork runtime mode (pcntl_fork, pcntl_waitpid)",
-        "ext-sockets": "Required for fork runtime mode (SCM_RIGHTS fd passing)"
+        "psr/http-factory": "Required for PsrHttpHandler (PSR-7 framework integration)"
     },
     "require-dev": {
         "phpunit/phpunit": "^13.1",

@@ -1,35 +1,21 @@
+#!/usr/bin/env php
 <?php
+// Generic Folk worker entry point.
+// Framework bootstrap is done via $GLOBALS['folk_worker_boot_hook']
+// registered by the framework adapter (folk-laravel, folk-spiral, etc.)
 
-if (PHP_MAJOR_VERSION < 8 || (PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION < 2)) {
-    fwrite(STDERR, "folk-worker requires PHP 8.2 or higher\n");
-    exit(1);
-}
-
-// When executed via Composer's bin proxy, autoload path is set globally.
-// When executed directly from the SDK repo, fall back to local vendor/.
 $autoload = $GLOBALS['_composer_autoload_path']
     ?? dirname(__DIR__) . '/vendor/autoload.php';
 
 if (!file_exists($autoload)) {
-    fwrite(STDERR, "folk-worker: vendor/autoload.php not found. Run 'composer install'.\n");
+    fwrite(STDERR, "folk-worker: vendor/autoload.php not found.\n");
     exit(1);
 }
 
 require $autoload;
 
-// Bootstrap the application framework if available (e.g. Laravel).
-// This triggers service providers which register boot hooks.
-$bootstrap = dirname(realpath($autoload), 2) . '/bootstrap/app.php';
-if (file_exists($bootstrap)) {
-    $app = require $bootstrap;
-    $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
-}
-
-// Create the worker loop (auto-detects extension vs pipe mode).
 $loop = new \Folk\Sdk\Worker\WorkerLoop();
 
-// Framework adapters (e.g. folk-laravel) register a boot hook that
-// configures HTTP handlers, resetters, etc.
 if (isset($GLOBALS['folk_worker_boot_hook'])) {
     ($GLOBALS['folk_worker_boot_hook'])($loop);
 }

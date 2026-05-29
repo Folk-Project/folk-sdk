@@ -1,4 +1,3 @@
-#!/usr/bin/env php
 <?php
 // Generic Folk worker entry point.
 // Framework bootstrap is done via $GLOBALS['folk_worker_boot_hook']

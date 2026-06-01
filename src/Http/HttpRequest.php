@@ -14,11 +14,16 @@ final readonly class HttpRequest
 
     public static function fromPayload(mixed $payload): self
     {
+        $body = (string) ($payload['body'] ?? '');
+        if (($payload['body_encoding'] ?? null) === 'base64') {
+            $body = base64_decode($body, true) ?: '';
+        }
+
         return new self(
             method: (string) ($payload['method'] ?? 'GET'),
             uri:    (string) ($payload['uri']    ?? '/'),
             headers: (array)  ($payload['headers'] ?? []),
-            body:   (string) ($payload['body']   ?? ''),
+            body:   $body,
         );
     }
 }

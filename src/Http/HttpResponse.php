@@ -14,10 +14,17 @@ final class HttpResponse
     /** @return array<string, mixed> */
     public function toPayload(): array
     {
-        return [
+        $payload = [
             'status'  => $this->status,
             'headers' => $this->headers,
             'body'    => $this->body,
         ];
+
+        if (!mb_check_encoding($this->body, 'UTF-8')) {
+            $payload['body'] = base64_encode($this->body);
+            $payload['body_encoding'] = 'base64';
+        }
+
+        return $payload;
     }
 }

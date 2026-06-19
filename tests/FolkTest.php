@@ -5,11 +5,11 @@ use PHPUnit\Framework\TestCase;
 
 final class FolkTest extends TestCase
 {
-    public function testRequestIdFallsBackToZeroWithoutExtension(): void
+    public function testRequestIdFallsBackToEmptyStringWithoutExtension(): void
     {
         // The Folk extension is not loaded during unit tests, so folk_request_id()
-        // is undefined and the facade must return 0 rather than error.
+        // is undefined and the facade must return '' rather than error.
         $this->assertFalse(\function_exists('folk_request_id'));
-        $this->assertSame(0, Folk::requestId());
+        $this->assertSame('', Folk::requestId());
     }
 }

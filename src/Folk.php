@@ -15,12 +15,13 @@ final class Folk
     /**
      * Id of the request currently being handled.
      *
-     * Stable for the duration of a single request — use it to correlate PHP
-     * application logs with Folk's Rust-side access logs. Returns 0 when no
-     * request is in flight or the Folk extension is not loaded.
+     * A globally-unique UUID (v7), stable for the duration of a single request —
+     * use it to correlate PHP application logs with Folk's Rust-side access logs.
+     * Returns an empty string when no request is in flight or the Folk extension
+     * is not loaded.
      */
-    public static function requestId(): int
+    public static function requestId(): string
     {
-        return \function_exists('folk_request_id') ? \folk_request_id() : 0;
+        return \function_exists('folk_request_id') ? \folk_request_id() : '';
     }
 }

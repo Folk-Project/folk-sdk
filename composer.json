@@ -24,6 +24,7 @@
         "psr/http-factory": "Required for PsrHttpHandler (PSR-7 framework integration)"
     },
     "require-dev": {
+        "psr/http-factory": "^1.0",
         "phpunit/phpunit": "^13.1",
         "phpstan/phpstan": "^2.1"
     }

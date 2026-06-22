@@ -87,6 +87,9 @@ final class WorkerLoop implements HandlerLoop
      * Direct dispatch for the zero-copy path (called from __folk_dispatch).
      *
      * Returns the handler result directly. On error, returns ['__error' => message].
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
      */
     public function dispatchDirect(string $method, array $params): array
     {

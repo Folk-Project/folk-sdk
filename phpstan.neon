@@ -1,0 +1,7 @@
+parameters:
+    level: 8
+    paths:
+        - src/
+    scanFiles:
+        - stubs/folk_ext.php
+        - stubs/protobuf.php

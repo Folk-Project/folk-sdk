@@ -13,7 +13,8 @@ interface GrpcModeHandler
      * @param string $method  Method name (e.g. "SayHello")
      * @param string $payload Raw protobuf bytes
      * @param Context $context gRPC metadata (headers, auth tokens, etc.)
-     * @return string Raw protobuf response bytes
+     * @return string|null Raw protobuf response bytes, or null when the handler
+     *                     reported a business status via $context->setStatus()
      */
-    public function call(string $service, string $method, string $payload, Context $context): string;
+    public function call(string $service, string $method, string $payload, Context $context): ?string;
 }

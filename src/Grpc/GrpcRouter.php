@@ -22,7 +22,7 @@ final class GrpcRouter implements GrpcModeHandler
         $this->services[$serviceName] = $handler;
     }
 
-    public function call(string $service, string $method, string $payload, Context $context): string
+    public function call(string $service, string $method, string $payload, Context $context): ?string
     {
         $handler = $this->services[$service]
             ?? throw new \RuntimeException("Unknown gRPC service: {$service}");
@@ -39,11 +39,18 @@ final class GrpcRouter implements GrpcModeHandler
             return $this->callTyped($handler, $method, $payload, $params, $context);
         }
 
-        return $handler->$method($payload);
+        $result = $handler->$method($payload);
+
+        // A business status (setStatus) preempts the response body.
+        if ($context->getStatus() !== null) {
+            return null;
+        }
+
+        return is_string($result) ? $result : null;
     }
 
     /** @param list<\ReflectionParameter> $params */
-    private function callTyped(object $handler, string $method, string $payload, array $params, Context $context): string
+    private function callTyped(object $handler, string $method, string $payload, array $params, Context $context): ?string
     {
         $args = [];
 
@@ -63,9 +70,15 @@ final class GrpcRouter implements GrpcModeHandler
             }
         }
 
-        /** @var \Google\Protobuf\Internal\Message $result */
         $result = $handler->$method(...$args);
 
+        // A business status (setStatus) preempts the response body; the handler
+        // returns null in that case.
+        if ($context->getStatus() !== null) {
+            return null;
+        }
+
+        /** @var \Google\Protobuf\Internal\Message $result */
         return $result->serializeToString();
     }
 

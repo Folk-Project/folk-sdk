@@ -60,9 +60,17 @@ final class WorkerLoop implements HandlerLoop
     public function registerGrpcHandler(GrpcModeHandler $handler): void
     {
         $this->register('grpc.call', function (mixed $params) use ($handler): mixed {
-            $request = GrpcRequest::fromPayload($params);
+            $request  = GrpcRequest::fromPayload($params);
             $response = $handler->call($request->service, $request->method, $request->payload, $request->context);
-            return base64_encode($response);
+
+            // A business status set via $context->setStatus() travels as a
+            // normal return value; the gRPC plugin maps it to the gRPC code.
+            $status = $request->context->getStatus();
+            if ($status !== null) {
+                return ['__grpc_status' => $status['code'], '__grpc_message' => $status['message']];
+            }
+
+            return base64_encode($response ?? '');
         });
     }
 
@@ -86,7 +94,11 @@ final class WorkerLoop implements HandlerLoop
     /**
      * Direct dispatch for the zero-copy path (called from __folk_dispatch).
      *
-     * Returns the handler result directly. On error, returns ['__error' => message].
+     * Returns the handler result directly. On a fatal error, returns
+     * ['__error' => message]; in dev mode (FOLK_DEV_MODE) the exception class
+     * and stack trace are added as '__error_class' / '__error_trace' for the
+     * server to surface — in production they are omitted to avoid leaking
+     * internals.
      *
      * @param array<string, mixed> $params
      * @return array<string, mixed>
@@ -95,14 +107,20 @@ final class WorkerLoop implements HandlerLoop
     {
         $result = $this->dispatch($method, $params);
         if ($result['error'] !== null) {
-            return ['__error' => $result['error']];
+            $error = ['__error' => $result['error']];
+            $throwable = $result['throwable'] ?? null;
+            if ($throwable instanceof \Throwable && getenv('FOLK_DEV_MODE') !== false) {
+                $error['__error_class'] = $throwable::class;
+                $error['__error_trace'] = $throwable->getTraceAsString();
+            }
+            return $error;
         }
         $this->runResetters();
         return is_array($result['result']) ? $result['result'] : ['__result' => $result['result']];
     }
 
     /**
-     * @return array{error: ?string, result: mixed}
+     * @return array{error: ?string, result: mixed, throwable?: \Throwable}
      */
     private function dispatch(string $method, mixed $params): array
     {
@@ -124,7 +142,7 @@ final class WorkerLoop implements HandlerLoop
             $result = ($this->handlers[$method])($params);
             return ['error' => null, 'result' => $result];
         } catch (\Throwable $e) {
-            return ['error' => $e->getMessage(), 'result' => null];
+            return ['error' => $e->getMessage(), 'result' => null, 'throwable' => $e];
         }
     }
 

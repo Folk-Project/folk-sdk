@@ -69,4 +69,29 @@ final class Folk
             \folk_write_end();
         }
     }
+
+    /**
+     * Read up to $length bytes of the streaming request body.
+     *
+     * Returns the next chunk of the request body, or an empty string at
+     * end-of-body. Blocks until data is available. Only yields data when the
+     * HTTP plugin runs in streaming mode (`stream_request_body = true`);
+     * otherwise the body is in $payload['body'] and this returns "".
+     *
+     * A single call may return fewer than $length bytes — loop until "".
+     */
+    public static function read(int $length = 8192): string
+    {
+        return \function_exists('folk_read') ? \folk_read($length) : '';
+    }
+
+    /**
+     * Read the entire streaming request body, blocking until end-of-body.
+     *
+     * Returns "" when there is no streaming body (buffered mode or no body).
+     */
+    public static function readAll(): string
+    {
+        return \function_exists('folk_read_all') ? \folk_read_all() : '';
+    }
 }

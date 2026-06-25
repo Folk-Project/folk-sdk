@@ -12,3 +12,5 @@ function folk_request_id(): string {}
 function folk_write_head(int $status, string $headers_json): void {}
 function folk_write(string $data): void {}
 function folk_write_end(): void {}
+function folk_read(int $length = 8192): string {}
+function folk_read_all(): string {}

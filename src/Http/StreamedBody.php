@@ -44,6 +44,31 @@ final class StreamedBody
     public function __construct(private readonly int $maxBytes = 0) {}
 
     /**
+     * Resolve the streamed-body byte limit for a request URI: the first matching
+     * per-path limit (a pattern ending in `*` is a prefix match, otherwise
+     * exact), else the default.
+     *
+     * @param array<string, int> $pathLimits
+     */
+    public static function resolveLimit(string $uri, int $default, array $pathLimits): int
+    {
+        $path = parse_url($uri, PHP_URL_PATH);
+        if (!is_string($path)) {
+            $path = $uri;
+        }
+        foreach ($pathLimits as $pattern => $limit) {
+            if (str_ends_with($pattern, '*')) {
+                if (str_starts_with($path, rtrim($pattern, '*'))) {
+                    return (int) $limit;
+                }
+            } elseif ($path === $pattern) {
+                return (int) $limit;
+            }
+        }
+        return $default;
+    }
+
+    /**
      * Drain a streamed `multipart/form-data` body: file parts → temp files
      * ({@see $files}), text parts → {@see $post}.
      */

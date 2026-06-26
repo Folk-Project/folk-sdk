@@ -166,5 +166,18 @@ namespace Folk\Sdk\Tests {
             $this->expectException(StreamLimitExceededException::class);
             $body->readRaw();
         }
+
+        public function testResolveLimit(): void
+        {
+            $limits = ['/upload' => 10, '/api/files/*' => 20];
+            // exact match
+            $this->assertSame(10, StreamedBody::resolveLimit('/upload', 0, $limits));
+            // prefix glob (and query string is ignored)
+            $this->assertSame(20, StreamedBody::resolveLimit('/api/files/a.png?x=1', 0, $limits));
+            // no match → default
+            $this->assertSame(5, StreamedBody::resolveLimit('/other', 5, $limits));
+            // exact pattern does not prefix-match
+            $this->assertSame(0, StreamedBody::resolveLimit('/upload/x', 0, $limits));
+        }
     }
 }

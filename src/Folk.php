@@ -94,4 +94,34 @@ final class Folk
     {
         return \function_exists('folk_read_all') ? \folk_read_all() : '';
     }
+
+    /**
+     * Advance to the next part of a streamed multipart/form-data request.
+     *
+     * Returns the next {@see Http\Part}, or null when there are no more parts
+     * (or the request is not a multipart streaming request, or the extension is
+     * not loaded). Any unread data of the current part is drained first, so it
+     * is safe to skip parts. Read a file part's body with `$part->read()`.
+     *
+     * Yields parts only when the HTTP plugin runs with stream_request_body = true
+     * and the request is `multipart/form-data`.
+     */
+    public static function nextPart(): ?Http\Part
+    {
+        if (!\function_exists('folk_next_part')) {
+            return null;
+        }
+        $json = \folk_next_part();
+        if ($json === null) {
+            return null;
+        }
+        /** @var array{name?:?string, filename?:?string, content_type?:?string} $meta */
+        $meta = \json_decode($json, true, 16, \JSON_THROW_ON_ERROR);
+
+        return new Http\Part(
+            name: $meta['name'] ?? null,
+            filename: $meta['filename'] ?? null,
+            contentType: $meta['content_type'] ?? null,
+        );
+    }
 }

@@ -14,3 +14,6 @@ function folk_write(string $data): void {}
 function folk_write_end(): void {}
 function folk_read(int $length = 8192): string {}
 function folk_read_all(): string {}
+function folk_next_part(): ?string {}
+function folk_part_read(int $length = 8192): string {}
+function folk_part_read_all(): string {}

@@ -5,8 +5,16 @@ on:
     tags: ['v*']
 
 jobs:
+  # Re-run the full test suite + PHPStan on the tagged commit. Packagist is only
+  # notified if this passes, so a release can never ship a red build even if the
+  # tag is pushed before the develop CI finishes.
+  test:
+    name: Verify tagged commit
+    uses: ./.github/workflows/ci.yml
+
   packagist:
     name: Notify Packagist
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Ping Packagist

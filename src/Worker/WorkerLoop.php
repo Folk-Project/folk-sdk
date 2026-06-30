@@ -86,9 +86,23 @@ final class WorkerLoop implements HandlerLoop
 
     public function run(): void
     {
+        \folk_worker_run($this->prepareDispatch());
+    }
+
+    /**
+     * Install the dispatch function and return its name (phase 79).
+     *
+     * Used by the fork-after-warm entry: call this in the master process after
+     * registering handlers and BEFORE forking, then pass the returned name to
+     * `Folk\Server::serveForked()`. The forked children inherit the registered
+     * loop and dispatch function via copy-on-write.
+     */
+    public function prepareDispatch(): string
+    {
         $GLOBALS['__folk_worker_loop'] = $this;
         require_once __DIR__ . '/dispatch_fn.php';
-        \folk_worker_run('__folk_dispatch');
+
+        return '__folk_dispatch';
     }
 
     /**

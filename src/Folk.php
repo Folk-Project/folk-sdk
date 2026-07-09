@@ -31,8 +31,11 @@ final class Folk
      * Must be called once per request before write() or end(). After calling
      * this, the return value of the PHP handler is ignored by Folk.
      *
-     * @param int                  $status  HTTP status code (e.g. 200).
-     * @param array<string,string> $headers Response headers.
+     * @param int                                $status  HTTP status code (e.g. 200).
+     * @param array<string, string|list<string>> $headers Response headers. A list
+     *        value (e.g. multiple Set-Cookie) is preserved: the native
+     *        `folk_write_head` expands each element into its own response header,
+     *        so repeated headers survive on the streaming path too (#86).
      */
     public static function writeHead(int $status, array $headers = []): void
     {

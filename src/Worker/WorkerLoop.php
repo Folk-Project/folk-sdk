@@ -119,18 +119,25 @@ final class WorkerLoop implements HandlerLoop
      */
     public function dispatchDirect(string $method, array $params): array
     {
-        $result = $this->dispatch($method, $params);
-        if ($result['error'] !== null) {
-            $error = ['__error' => $result['error']];
-            $throwable = $result['throwable'] ?? null;
-            if ($throwable instanceof \Throwable && getenv('FOLK_DEV_MODE') !== false) {
-                $error['__error_class'] = $throwable::class;
-                $error['__error_trace'] = $throwable->getTraceAsString();
+        // Resetters must run between requests on BOTH the success and the error
+        // path: a request that logs a user in and then throws would otherwise
+        // leak its auth/session state into the next request on this warm worker
+        // (folk-releases #86). `finally` guarantees the reset regardless of outcome.
+        try {
+            $result = $this->dispatch($method, $params);
+            if ($result['error'] !== null) {
+                $error = ['__error' => $result['error']];
+                $throwable = $result['throwable'] ?? null;
+                if ($throwable instanceof \Throwable && getenv('FOLK_DEV_MODE') !== false) {
+                    $error['__error_class'] = $throwable::class;
+                    $error['__error_trace'] = $throwable->getTraceAsString();
+                }
+                return $error;
             }
-            return $error;
+            return is_array($result['result']) ? $result['result'] : ['__result' => $result['result']];
+        } finally {
+            $this->runResetters();
         }
-        $this->runResetters();
-        return is_array($result['result']) ? $result['result'] : ['__result' => $result['result']];
     }
 
     /**

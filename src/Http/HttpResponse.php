@@ -6,7 +6,7 @@ final class HttpResponse
 {
     public function __construct(
         public int $status = 200,
-        /** @var array<string, string> */
+        /** @var array<string, string|list<string>> */
         public array $headers = [],
         public string $body = '',
     ) {}

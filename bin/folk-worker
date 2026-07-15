@@ -11,6 +11,11 @@ if (!file_exists($autoload)) {
     exit(1);
 }
 
+// Normalize the autoload path: the Composer bin-proxy sets _composer_autoload_path
+// with a literal ".." that string path ops do not collapse. realpath() expands it,
+// keeping the autoload logic aligned with the adapter bin/folk-server entrypoints.
+$autoload = realpath($autoload);
+
 require $autoload;
 
 $loop = new \Folk\Sdk\Worker\WorkerLoop();

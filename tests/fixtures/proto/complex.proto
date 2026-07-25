@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package folk.test.complex;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/struct.proto";
+
+enum Color {
+  COLOR_UNSPECIFIED = 0;
+  RED = 1;
+  GREEN = 2;
+  BLUE = 3;
+}
+
+message Inner {
+  string label = 1;
+}
+
+message Everything {
+  string name = 1;
+  int64 big = 2;
+  uint64 ubig = 3;
+  bool flag = 4;
+  bytes blob = 5;
+  Color color = 6;
+  repeated string tags = 7;
+  map<string, int32> counts = 8;
+  Inner inner = 9;
+  optional string maybe = 10;
+
+  oneof choice {
+    string text = 11;
+    int32 number = 12;
+  }
+
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.StringValue nickname = 14;
+  google.protobuf.Struct extra = 15;
+}
+
+service ComplexService {
+  rpc Echo (Everything) returns (Everything);
+}

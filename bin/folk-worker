@@ -18,6 +18,12 @@ $autoload = realpath($autoload);
 
 require $autoload;
 
+// gRPC descriptor-export submode (phase 87): `folk-worker grpc:descriptors <proto…>`
+// compiles proto → FileDescriptorSet on stdout and exits, WITHOUT booting the app
+// or forking workers. No-op for any other argv. Proto paths resolve relative to
+// the launch CWD (the generator invokes this from the project root).
+\Folk\Sdk\Grpc\Codegen\DescriptorCli::maybeHandle($argv);
+
 $loop = new \Folk\Sdk\Worker\WorkerLoop();
 
 if (isset($GLOBALS['folk_worker_boot_hook'])) {

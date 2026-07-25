@@ -17,7 +17,7 @@
             "Folk\\Sdk\\": "src/"
         }
     },
-    "bin": ["bin/folk-worker"],
+    "bin": ["bin/folk-worker", "bin/folk-grpc-gen"],
     "minimum-stability": "stable",
     "suggest": {
         "ext-folk": "Folk PHP extension — install via: pie install folk-project/ext-folk",

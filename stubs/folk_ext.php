@@ -18,6 +18,15 @@ namespace {
     function folk_next_part(): ?string {}
     function folk_part_read(int $length = 8192): string {}
     function folk_part_read_all(): string {}
+
+    /**
+     * Compile proto files to an encoded FileDescriptorSet (raw protobuf bytes).
+     * Present only when the build includes the gRPC plugin (phase 87). Used by
+     * the code generator and the `folk-server grpc:descriptors` submode.
+     *
+     * @param list<string> $paths Proto file paths, resolved relative to the CWD.
+     */
+    function folk_grpc_descriptors(array $paths): string {}
 }
 
 namespace Folk {

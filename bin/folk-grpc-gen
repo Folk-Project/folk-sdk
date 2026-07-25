@@ -1,0 +1,86 @@
+#!/usr/bin/env php
+<?php
+// Folk gRPC code generator — native entry point (phase 87).
+//
+//   folk-grpc-gen --out app/Grpc/Generated --namespace 'App\Grpc\Generated' \
+//                 proto/hello.proto proto/complex.proto
+//
+// Generates plain readonly DTOs, int-backed enums, and *Interface contracts from
+// .proto files, without protoc or ext-protobuf. The framework adapters wrap this
+// same logic in a `folk:grpc:generate` console command; this binary is the
+// framework-agnostic path.
+
+$autoload = $GLOBALS['_composer_autoload_path']
+    ?? dirname(__DIR__) . '/vendor/autoload.php';
+
+if (!file_exists($autoload)) {
+    // Fallback: this package installed as a dependency (vendor/folk/sdk/bin).
+    $alt = dirname(__DIR__, 3) . '/autoload.php';
+    if (file_exists($alt)) {
+        $autoload = $alt;
+    }
+}
+
+if (!file_exists($autoload)) {
+    fwrite(STDERR, "folk-grpc-gen: vendor/autoload.php not found.\n");
+    exit(1);
+}
+
+// Normalize like bin/folk-worker: the Composer bin-proxy sets the path with a
+// literal ".." that string ops do not collapse (folk-releases#79, phase 86).
+$autoload = realpath($autoload) ?: $autoload;
+require $autoload;
+
+use Folk\Sdk\Grpc\Codegen\ProtoGen;
+
+/** @param list<string> $argv */
+function folk_grpc_gen_main(array $argv): int
+{
+    $out = null;
+    $namespace = null;
+    $protos = [];
+
+    for ($i = 1, $n = count($argv); $i < $n; $i++) {
+        $arg = $argv[$i];
+        if ($arg === '--out' || $arg === '-o') {
+            $out = $argv[++$i] ?? null;
+        } elseif ($arg === '--namespace' || $arg === '-n') {
+            $namespace = $argv[++$i] ?? null;
+        } elseif (str_starts_with($arg, '--out=')) {
+            $out = substr($arg, 6);
+        } elseif (str_starts_with($arg, '--namespace=')) {
+            $namespace = substr($arg, 12);
+        } elseif ($arg === '--help' || $arg === '-h') {
+            fwrite(STDOUT, folk_grpc_gen_usage());
+            return 0;
+        } else {
+            $protos[] = $arg;
+        }
+    }
+
+    if ($out === null || $namespace === null || $protos === []) {
+        fwrite(STDERR, "folk-grpc-gen: missing --out, --namespace, or .proto files.\n\n");
+        fwrite(STDERR, folk_grpc_gen_usage());
+        return 1;
+    }
+
+    try {
+        $written = ProtoGen::run($protos, $out, $namespace);
+    } catch (\Throwable $e) {
+        fwrite(STDERR, 'folk-grpc-gen: ' . $e->getMessage() . "\n");
+        return 1;
+    }
+
+    fwrite(STDOUT, 'Generated ' . count($written) . " file(s) in {$out}:\n");
+    foreach ($written as $path) {
+        fwrite(STDOUT, '  ' . $path . "\n");
+    }
+    return 0;
+}
+
+function folk_grpc_gen_usage(): string
+{
+    return "usage: folk-grpc-gen --out <dir> --namespace <ns> <file.proto> [<file.proto> …]\n";
+}
+
+exit(folk_grpc_gen_main($argv));

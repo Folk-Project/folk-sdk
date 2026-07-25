@@ -61,13 +61,20 @@ final class WorkerLoop implements HandlerLoop
     {
         $this->register('grpc.call', function (mixed $params) use ($handler): mixed {
             $request  = GrpcRequest::fromPayload($params);
-            $response = $handler->call($request->service, $request->method, $request->payload, $request->context);
+            $response = $handler->call($request);
 
             // A business status set via $context->setStatus() travels as a
             // normal return value; the gRPC plugin maps it to the gRPC code.
             $status = $request->context->getStatus();
             if ($status !== null) {
                 return ['__grpc_status' => $status['code'], '__grpc_message' => $status['message']];
+            }
+
+            // Transcode tier: a structured `['__message' => array]` envelope the
+            // plugin re-encodes via the output descriptor. Passthrough tier: raw
+            // protobuf bytes, base64-framed for JSON transport.
+            if (is_array($response)) {
+                return $response;
             }
 
             return base64_encode($response ?? '');

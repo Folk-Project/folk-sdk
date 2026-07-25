@@ -2,6 +2,7 @@
 
 use Folk\Sdk\Grpc\Context;
 use Folk\Sdk\Grpc\GrpcModeHandler;
+use Folk\Sdk\Grpc\GrpcRequest;
 use Folk\Sdk\Worker\WorkerLoop;
 use PHPUnit\Framework\TestCase;
 
@@ -23,9 +24,9 @@ final class GrpcStatusTest extends TestCase
     public function testGrpcHandlerWithStatusReturnsGrpcStatusEnvelope(): void
     {
         $handler = new class implements GrpcModeHandler {
-            public function call(string $service, string $method, string $payload, Context $context): ?string
+            public function call(GrpcRequest $request): string|array|null
             {
-                $context->setStatus(5, 'nope');
+                $request->context->setStatus(5, 'nope');
                 return null;
             }
         };
@@ -46,7 +47,7 @@ final class GrpcStatusTest extends TestCase
     public function testGrpcHandlerWithoutStatusReturnsBase64Result(): void
     {
         $handler = new class implements GrpcModeHandler {
-            public function call(string $service, string $method, string $payload, Context $context): ?string
+            public function call(GrpcRequest $request): string|array|null
             {
                 return 'response-bytes';
             }

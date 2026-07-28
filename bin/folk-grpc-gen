@@ -32,12 +32,15 @@ $autoload = realpath($autoload) ?: $autoload;
 require $autoload;
 
 use Folk\Sdk\Grpc\Codegen\ProtoGen;
+use Folk\Sdk\Grpc\Codegen\ProtoGenerator;
 
 /** @param list<string> $argv */
 function folk_grpc_gen_main(array $argv): int
 {
     $out = null;
     $namespace = null;
+    $role = ProtoGenerator::ROLE_SERVER;
+    $clientName = '';
     $protos = [];
 
     for ($i = 1, $n = count($argv); $i < $n; $i++) {
@@ -50,6 +53,13 @@ function folk_grpc_gen_main(array $argv): int
             $out = substr($arg, 6);
         } elseif (str_starts_with($arg, '--namespace=')) {
             $namespace = substr($arg, 12);
+        } elseif ($arg === '--client') {
+            // `--client <name>` emits *Client stubs bound to [grpc.clients.<name>].
+            $role = ProtoGenerator::ROLE_CLIENT;
+            $clientName = $argv[++$i] ?? '';
+        } elseif (str_starts_with($arg, '--client=')) {
+            $role = ProtoGenerator::ROLE_CLIENT;
+            $clientName = substr($arg, 9);
         } elseif ($arg === '--help' || $arg === '-h') {
             fwrite(STDOUT, folk_grpc_gen_usage());
             return 0;
@@ -64,14 +74,21 @@ function folk_grpc_gen_main(array $argv): int
         return 1;
     }
 
+    if ($role === ProtoGenerator::ROLE_CLIENT && $clientName === '') {
+        fwrite(STDERR, "folk-grpc-gen: --client requires a client name (matching [grpc.clients.<name>]).\n\n");
+        fwrite(STDERR, folk_grpc_gen_usage());
+        return 1;
+    }
+
     try {
-        $written = ProtoGen::run($protos, $out, $namespace);
+        $written = ProtoGen::run($protos, $out, $namespace, null, $role, $clientName);
     } catch (\Throwable $e) {
         fwrite(STDERR, 'folk-grpc-gen: ' . $e->getMessage() . "\n");
         return 1;
     }
 
-    fwrite(STDOUT, 'Generated ' . count($written) . " file(s) in {$out}:\n");
+    $what = $role === ProtoGenerator::ROLE_CLIENT ? "client ({$clientName})" : 'server';
+    fwrite(STDOUT, "Generated {$what}: " . count($written) . " file(s) in {$out}:\n");
     foreach ($written as $path) {
         fwrite(STDOUT, '  ' . $path . "\n");
     }
@@ -80,7 +97,9 @@ function folk_grpc_gen_main(array $argv): int
 
 function folk_grpc_gen_usage(): string
 {
-    return "usage: folk-grpc-gen --out <dir> --namespace <ns> <file.proto> [<file.proto> …]\n";
+    return "usage: folk-grpc-gen --out <dir> --namespace <ns> [--client <name>] <file.proto> [<file.proto> …]\n"
+        . "  (default) server role: emits {Service}Interface\n"
+        . "  --client <name>:       emits {Service}Client bound to [grpc.clients.<name>]\n";
 }
 
 exit(folk_grpc_gen_main($argv));

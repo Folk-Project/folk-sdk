@@ -19,6 +19,8 @@ final class ProtoGen
      * Generate PHP from `.proto` files into `$outDir`.
      *
      * @param list<string> $protoPaths .proto files (relative to the CWD)
+     * @param ProtoGenerator::ROLE_* $role       server (`*Interface`) or client (`*Client`)
+     * @param string                 $clientName `[grpc.clients.<name>]` baked into client stubs
      * @return list<string> absolute paths of the files written
      */
     public static function run(
@@ -26,21 +28,29 @@ final class ProtoGen
         string $outDir,
         string $namespace,
         ?DescriptorProvider $provider = null,
+        string $role = ProtoGenerator::ROLE_SERVER,
+        string $clientName = '',
     ): array {
         $provider ??= new DescriptorProvider();
         $fds = $provider->fetch($protoPaths);
-        return self::fromFds($fds, $outDir, $namespace);
+        return self::fromFds($fds, $outDir, $namespace, $role, $clientName);
     }
 
     /**
      * Generate PHP from an already-obtained encoded `FileDescriptorSet`.
      *
+     * @param ProtoGenerator::ROLE_* $role
      * @return list<string> absolute paths of the files written
      */
-    public static function fromFds(string $fds, string $outDir, string $namespace): array
-    {
+    public static function fromFds(
+        string $fds,
+        string $outDir,
+        string $namespace,
+        string $role = ProtoGenerator::ROLE_SERVER,
+        string $clientName = '',
+    ): array {
         $files = FdsParser::parse($fds);
-        $generated = (new ProtoGenerator($files, trim($namespace, '\\')))->generate();
+        $generated = (new ProtoGenerator($files, trim($namespace, '\\'), $role, $clientName))->generate();
 
         if (!is_dir($outDir) && !mkdir($outDir, 0o777, true) && !is_dir($outDir)) {
             throw new \RuntimeException("cannot create output directory: {$outDir}");

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Folk\Sdk;
 
+use Folk\Sdk\Grpc\Client\GrpcClient;
+
 /**
  * Folk runtime facade.
  *
@@ -12,6 +14,24 @@ namespace Folk\Sdk;
  */
 final class Folk
 {
+    /**
+     * Construct a generated gRPC **client** stub (phase 88).
+     *
+     * The stub calls upstream services via `folk_call('grpc.client.call', …)`; it
+     * resolves its endpoint/TLS/deadline from the `[grpc.clients.<name>]` entry
+     * named by its baked `CLIENT` constant. Pass `$address` to override the
+     * endpoint for this instance.
+     *
+     * @template T of GrpcClient
+     * @param class-string<T> $stubClass a generated `{Service}Client`
+     * @param string|null     $address   optional `host:port` endpoint override
+     * @return T
+     */
+    public static function grpcClient(string $stubClass, ?string $address = null): GrpcClient
+    {
+        return new $stubClass($address);
+    }
+
     /**
      * Id of the request currently being handled.
      *

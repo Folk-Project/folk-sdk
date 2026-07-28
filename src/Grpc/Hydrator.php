@@ -29,8 +29,10 @@ final class Hydrator
      * their constructor default (unset proto3 singular → zero, message/oneof →
      * null), so presence semantics survive the round-trip.
      *
-     * @param class-string        $class
+     * @template T of object
+     * @param class-string<T>     $class
      * @param array<string, mixed> $data
+     * @return T
      */
     public function hydrate(string $class, array $data): object
     {

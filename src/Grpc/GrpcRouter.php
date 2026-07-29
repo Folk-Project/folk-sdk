@@ -29,7 +29,7 @@ final class GrpcRouter implements GrpcModeHandler
         $this->services[$serviceName] = $handler;
     }
 
-    public function call(GrpcRequest $request): string|array|null
+    public function call(GrpcRequest $request): string|array|\Traversable|null
     {
         $handler = $this->services[$request->service]
             ?? throw new \RuntimeException("Unknown gRPC service: {$request->service}");
@@ -48,13 +48,19 @@ final class GrpcRouter implements GrpcModeHandler
     }
 
     /**
-     * Transcode tier: `method(RequestDto $request, Context $context): ReplyDto`.
-     * The result DTO is flattened back to `['__message' => array]` for the plugin
-     * to re-encode; a business status suppresses the body (returns null).
+     * Transcode tier. Unary: `method(RequestDto $request, Context $context):
+     * ReplyDto` — the result DTO is flattened to `['__message' => array]` and a
+     * business status suppresses the body (returns null).
      *
-     * @return array{__message: array<string, mixed>}|null
+     * Server-streaming (phase 88b, #32): `method(RequestDto $request, Context
+     * $context): iterable<ReplyDto>` — the handler yields response DTOs. We return
+     * a generator that dehydrates each; the {@see \Folk\Sdk\Worker\WorkerLoop}
+     * frames every value as a gRPC message and reads the trailing business status
+     * only after the stream drains (so a status set mid-stream is honoured).
+     *
+     * @return array{__message: array<string, mixed>}|\Generator<int, array<string, mixed>>|null
      */
-    private function callTranscoded(object $handler, GrpcRequest $request): ?array
+    private function callTranscoded(object $handler, GrpcRequest $request): array|\Traversable|null
     {
         $ref = new \ReflectionMethod($handler, $request->method);
         $dtoClass = $this->requestDtoClass($ref);
@@ -65,8 +71,15 @@ final class GrpcRouter implements GrpcModeHandler
         }
         $args[] = $request->context;
 
-        /** @var object|null $result */
+        /** @var mixed $result */
         $result = $handler->{$request->method}(...$args);
+
+        // Server-streaming: the handler returned an iterable of response DTOs. The
+        // status is NOT checked here — the handler runs lazily as the generator is
+        // drained, so a status set during iteration is read afterwards by the loop.
+        if ($result instanceof \Traversable) {
+            return $this->dehydrateStream($result);
+        }
 
         if ($request->context->getStatus() !== null) {
             return null;
@@ -79,6 +92,24 @@ final class GrpcRouter implements GrpcModeHandler
         }
 
         return ['__message' => $this->hydrator->dehydrate($result)];
+    }
+
+    /**
+     * Adapt a server-streaming handler's `iterable<ReplyDto>` into a generator of
+     * dehydrated message arrays for the WorkerLoop to frame one gRPC message at a
+     * time.
+     *
+     * @param \Traversable<mixed, mixed> $stream
+     * @return \Generator<int, array<string, mixed>>
+     */
+    private function dehydrateStream(\Traversable $stream): \Generator
+    {
+        foreach ($stream as $dto) {
+            if (!is_object($dto)) {
+                throw new \RuntimeException('server-streaming handler must yield DTO objects');
+            }
+            yield $this->hydrator->dehydrate($dto);
+        }
     }
 
     /**

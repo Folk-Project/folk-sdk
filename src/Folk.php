@@ -94,6 +94,27 @@ final class Folk
     }
 
     /**
+     * Yield one message in a gRPC **server-streaming** response (phase 88b, #32).
+     *
+     * Each call emits one message to the client, so a handler streams a large or
+     * unbounded result without buffering it. `$messageJson` is the JSON envelope
+     * the transport frames — normally `{"__message": <dto>}` for a response
+     * message, or `{"__grpc_status": <code>, "__grpc_message": <msg>}` to end the
+     * stream with a business status. The WorkerLoop builds this envelope for each
+     * value a generator handler yields; application handlers yield typed DTOs and
+     * never call this directly.
+     *
+     * Blocks until the message is accepted (a slow client applies backpressure,
+     * blocking the worker). No-op without the Folk extension.
+     */
+    public static function grpcYield(string $messageJson): void
+    {
+        if (\function_exists('folk_grpc_yield')) {
+            \folk_grpc_yield($messageJson);
+        }
+    }
+
+    /**
      * Read up to $length bytes of the streaming request body.
      *
      * Returns the next chunk of the request body, or an empty string at

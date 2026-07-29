@@ -33,10 +33,16 @@ abstract class GrpcClient
     /** @var callable(string, string): string */
     private $transport;
 
-    /** @var array<string, list<string>> outbound metadata (multimap) */
-    private array $metadata = [];
+    /**
+     * @var array<string, list<string>> outbound metadata (multimap)
+     *
+     * `protected` so the streaming subclass ({@see GrpcStreamClient}) can fold it
+     * into the `grpc.client.stream` envelope (phase 88b).
+     */
+    protected array $metadata = [];
 
-    private ?float $deadline = null;
+    /** @see $metadata for why this is protected. */
+    protected ?float $deadline = null;
 
     /**
      * @param string|null $address optional endpoint override (`host:port`); when
@@ -45,9 +51,9 @@ abstract class GrpcClient
      *        to the `folk_call()` native function. Injectable for tests.
      */
     public function __construct(
-        private readonly ?string $address = null,
+        protected readonly ?string $address = null,
         ?callable $transport = null,
-        private readonly Hydrator $hydrator = new Hydrator(),
+        protected readonly Hydrator $hydrator = new Hydrator(),
     ) {
         $this->transport = $transport ?? static fn (string $method, string $payload): string
             => (string) \folk_call($method, $payload);

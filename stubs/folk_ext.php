@@ -13,6 +13,22 @@ namespace {
     function folk_write_head(int $status, string $headers_json): void {}
     function folk_write(string $data): void {}
     function folk_write_end(): void {}
+
+    /**
+     * Yield one message in a gRPC server-streaming response (phase 88b, #32).
+     * Present only when the build includes the gRPC plugin. `$message_json` is a
+     * JSON envelope: `{"__message": <dto>}` for a response message, or
+     * `{"__grpc_status": <code>, "__grpc_message": <msg>}` to end with a status.
+     */
+    function folk_grpc_yield(string $message_json): void {}
+
+    // gRPC streaming client bridge (phase 88b, #32). Present only when the build
+    // includes the gRPC plugin. Handle-based blocking stream over `folk_stream_*`.
+    function folk_stream_open(string $method, string $payload): int {}
+    function folk_stream_recv(int $handle): ?string {}
+    function folk_stream_send(int $handle, string $payload): void {}
+    function folk_stream_close_send(int $handle): void {}
+    function folk_stream_close(int $handle): bool {}
     function folk_read(int $length = 8192): string {}
     function folk_read_all(): string {}
     function folk_next_part(): ?string {}

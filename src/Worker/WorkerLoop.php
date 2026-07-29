@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Folk\Sdk\Worker;
 
+use Folk\Sdk\Folk;
 use Folk\Sdk\Grpc\GrpcModeHandler;
 use Folk\Sdk\Grpc\GrpcRequest;
 use Folk\Sdk\Http\HttpModeHandler;
@@ -62,6 +63,29 @@ final class WorkerLoop implements HandlerLoop
         $this->register('grpc.call', function (mixed $params) use ($handler): mixed {
             $request  = GrpcRequest::fromPayload($params);
             $response = $handler->call($request);
+
+            // Server-streaming (phase 88b, #32): the handler returns a Traversable
+            // of response messages (typically a generator). Drain it lazily,
+            // framing each value as a `{__message: dto}` yield — the transport
+            // emits each as its own gRPC message, so a large or unbounded result
+            // never buffers in memory. A business status set during or after
+            // iteration ends the stream with that gRPC code. The eventual return
+            // value is ignored: the stream is already finalised via the yields
+            // (`folk_grpc_yield`), and Folk emits the closing OK trailer.
+            if ($response instanceof \Traversable) {
+                foreach ($response as $message) {
+                    Folk::grpcYield(json_encode(['__message' => $message], JSON_THROW_ON_ERROR));
+                }
+                $status = $request->context->getStatus();
+                if ($status !== null) {
+                    Folk::grpcYield(json_encode(
+                        ['__grpc_status' => $status['code'], '__grpc_message' => $status['message']],
+                        JSON_THROW_ON_ERROR,
+                    ));
+                }
+
+                return null;
+            }
 
             // A business status set via $context->setStatus() travels as a
             // normal return value; the gRPC plugin maps it to the gRPC code.

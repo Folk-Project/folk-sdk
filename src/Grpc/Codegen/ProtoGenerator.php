@@ -8,6 +8,7 @@ use Folk\Sdk\Grpc\Codegen\Descriptor\EnumDescriptor;
 use Folk\Sdk\Grpc\Codegen\Descriptor\FieldDescriptor;
 use Folk\Sdk\Grpc\Codegen\Descriptor\FileDescriptor;
 use Folk\Sdk\Grpc\Codegen\Descriptor\MessageDescriptor;
+use Folk\Sdk\Grpc\Codegen\Descriptor\MethodDescriptor;
 use Folk\Sdk\Grpc\Codegen\Descriptor\ServiceDescriptor;
 
 /**
@@ -157,13 +158,28 @@ final class ProtoGenerator
         $fqName = $file->package === '' ? $service->name : "{$file->package}.{$service->name}";
         $methods = '';
         foreach ($service->methods as $method) {
-            if ($method->clientStreaming || $method->serverStreaming) {
-                $methods .= "    // {$method->name}: streaming RPC — not supported by transcoding (phase 87)\n";
-                continue;
-            }
             $in = $this->symbols->className($method->inputType) ?? 'array';
             $out = $this->symbols->className($method->outputType) ?? 'array';
-            // Nullable return: a handler reports a business outcome via
+
+            // Server-streaming (phase 88b, #32): the handler yields response DTOs;
+            // the WorkerLoop frames each. One request in, a stream of `$out` out.
+            if ($method->serverStreaming && !$method->clientStreaming) {
+                $methods .= "    /** @return iterable<{$out}> */\n";
+                $methods .= "    public function {$method->name}({$in} \$request, Context \$context): iterable;\n";
+                continue;
+            }
+
+            // Client-streaming / bidi on the SERVER are not supported in v1 (the
+            // server does not yet feed an inbound request stream to PHP). The
+            // client stub handles all three kinds; only the server half is limited.
+            // (Reaching here, server-streaming-only was already handled above, so a
+            // remaining streaming method is necessarily client-streaming or bidi.)
+            if ($method->clientStreaming) {
+                $methods .= "    // {$method->name}: client-streaming/bidi server handler — not supported (v1; server → later)\n";
+                continue;
+            }
+
+            // Unary. Nullable return: a handler reports a business outcome via
             // $context->setStatus() and returns null (standard gRPC idiom).
             $methods .= "    public function {$method->name}({$in} \$request, Context \$context): ?{$out};\n";
         }
@@ -190,10 +206,23 @@ final class ProtoGenerator
     private function renderClient(FileDescriptor $file, ServiceDescriptor $service): string
     {
         $fqName = $file->package === '' ? $service->name : "{$file->package}.{$service->name}";
+
+        // A service that mixes unary and streaming RPCs extends the streaming base
+        // (which IS-A GrpcClient), so both kinds live on one stub. Unary-only
+        // services keep the leaner GrpcClient base (phase-88 output unchanged).
+        $hasStreaming = false;
+        foreach ($service->methods as $method) {
+            if ($method->clientStreaming || $method->serverStreaming) {
+                $hasStreaming = true;
+                break;
+            }
+        }
+        $base = $hasStreaming ? 'GrpcStreamClient' : 'GrpcClient';
+
         $methods = '';
         foreach ($service->methods as $method) {
             if ($method->clientStreaming || $method->serverStreaming) {
-                $methods .= "    // {$method->name}: streaming RPC — unary client only (phase 88; streaming → #32)\n\n";
+                $methods .= $this->renderClientStreamMethod($method);
                 continue;
             }
             $in = $this->symbols->className($method->inputType);
@@ -232,12 +261,108 @@ final class ProtoGenerator
 
         return $this->file(
             <<<PHP
-            final class {$service->name}Client extends GrpcClient
+            final class {$service->name}Client extends {$base}
             {
             {$body}}
             PHP,
-            ["use Folk\\Sdk\\Grpc\\Client\\GrpcClient;"],
+            ["use Folk\\Sdk\\Grpc\\Client\\{$base};"],
         );
+    }
+
+    /**
+     * Render one client-stub method for a streaming RPC (phase 88b, #32):
+     * server-streaming (`In` → `iterable<Out>`), client-streaming
+     * (`iterable<In>` → `Out`), or bidi (`iterable<In>` → `iterable<Out>`). Falls
+     * back to raw-array exchange when a message type is not a generatable DTO.
+     */
+    private function renderClientStreamMethod(MethodDescriptor $method): string
+    {
+        $in = $this->symbols->className($method->inputType);
+        $out = $this->symbols->className($method->outputType);
+        $name = $method->name;
+        $typed = $in !== null && $out !== null;
+
+        // Server-streaming: one request → a lazy stream of responses.
+        if ($method->serverStreaming && !$method->clientStreaming) {
+            if ($typed) {
+                return <<<PHP
+                        /** @return \Generator<int, {$out}> */
+                        public function {$name}({$in} \$request): \Generator
+                        {
+                            return \$this->serverStream('{$name}', \$request, {$out}::class);
+                        }
+
+
+                    PHP;
+            }
+            return <<<PHP
+                    /**
+                     * @param array<string, mixed> \$request
+                     * @return \Generator<int, array<string, mixed>>
+                     */
+                    public function {$name}(array \$request): \Generator
+                    {
+                        return \$this->serverStreamArray('{$name}', \$request);
+                    }
+
+
+                PHP;
+        }
+
+        // Client-streaming: a stream of requests → one response.
+        if ($method->clientStreaming && !$method->serverStreaming) {
+            if ($typed) {
+                return <<<PHP
+                        /** @param iterable<{$in}> \$requests */
+                        public function {$name}(iterable \$requests): {$out}
+                        {
+                            return \$this->clientStream('{$name}', \$requests, {$out}::class);
+                        }
+
+
+                    PHP;
+            }
+            return <<<PHP
+                    /**
+                     * @param iterable<array<string, mixed>> \$requests
+                     * @return array<string, mixed>
+                     */
+                    public function {$name}(iterable \$requests): array
+                    {
+                        return \$this->clientStreamArray('{$name}', \$requests);
+                    }
+
+
+                PHP;
+        }
+
+        // Bidirectional streaming (v1 serialized — see GrpcStreamClient).
+        if ($typed) {
+            return <<<PHP
+                    /**
+                     * @param iterable<{$in}> \$requests
+                     * @return \Generator<int, {$out}>
+                     */
+                    public function {$name}(iterable \$requests): \Generator
+                    {
+                        return \$this->bidiStream('{$name}', \$requests, {$out}::class);
+                    }
+
+
+                PHP;
+        }
+        return <<<PHP
+                /**
+                 * @param iterable<array<string, mixed>> \$requests
+                 * @return \Generator<int, array<string, mixed>>
+                 */
+                public function {$name}(iterable \$requests): \Generator
+                {
+                    return \$this->bidiStreamArray('{$name}', \$requests);
+                }
+
+
+            PHP;
     }
 
     /**

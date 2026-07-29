@@ -16,9 +16,16 @@ interface GrpcModeHandler
      *  - passthrough: `$request->payload` is raw protobuf bytes — the handler
      *    returns raw response bytes (a string).
      *
-     * @return string|array<string, mixed>|null Raw protobuf bytes (passthrough), a
-     *         `['__message' => array]` envelope (transcode), or null when the
-     *         handler reported a business status via `$context->setStatus()`.
+     * For a **server-streaming** method (phase 88b, #32) the handler instead
+     * returns a `Traversable` of response messages — typically a generator that
+     * `yield`s one `array<string, mixed>` DTO per message. The WorkerLoop drains
+     * it and frames each value as a separate gRPC message.
+     *
+     * @return string|array<string, mixed>|\Traversable<mixed, array<string, mixed>>|null
+     *         Raw protobuf bytes (passthrough), a `['__message' => array]`
+     *         envelope (unary transcode), a `Traversable` of DTO arrays
+     *         (server-streaming), or null when the handler reported a business
+     *         status via `$context->setStatus()`.
      */
-    public function call(GrpcRequest $request): string|array|null;
+    public function call(GrpcRequest $request): string|array|\Traversable|null;
 }

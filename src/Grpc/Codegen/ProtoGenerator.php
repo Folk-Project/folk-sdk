@@ -69,8 +69,11 @@ final class ProtoGenerator
     }
 
     /**
-     * Generate all files. Returns `relativePath => phpSource` (paths are flat,
-     * one class per file, named after the PHP class).
+     * Generate all files. Returns `relativePath => phpSource`. When the target
+     * namespace contains `{package}` (phase 90), each class is placed in a
+     * package-derived sub-namespace and the path mirrors it (e.g.
+     * `Io/Altessa/Serviceinfo/V1/ServiceInfo.php`); otherwise the flat layout is
+     * preserved (`ServiceInfo.php`).
      *
      * @return array<string, string>
      */
@@ -80,20 +83,25 @@ final class ProtoGenerator
 
         foreach ($this->symbols->generatableEnums() as $fqn => $enum) {
             $class = $this->symbols->className($fqn) ?? $enum->name;
-            $out["{$class}.php"] = $this->renderEnum($class, $enum);
+            $pkg = $this->symbols->package($fqn);
+            $out[$this->path($pkg, $class)] = $this->renderEnum($class, $enum, $this->namespaceFor($pkg));
         }
 
         foreach ($this->symbols->generatableMessages() as $fqn => $message) {
             $class = $this->symbols->className($fqn) ?? $message->name;
-            $out["{$class}.php"] = $this->renderMessage($class, $message);
+            $pkg = $this->symbols->package($fqn);
+            $out[$this->path($pkg, $class)] = $this->renderMessage($class, $message, $this->namespaceFor($pkg));
         }
 
         foreach ($this->files as $file) {
+            $ns = $this->namespaceFor($file->package);
             foreach ($file->services as $service) {
                 if ($this->role === self::ROLE_CLIENT) {
-                    $out["{$service->name}Client.php"] = $this->renderClient($file, $service);
+                    $out[$this->path($file->package, "{$service->name}Client")]
+                        = $this->renderClient($file, $service, $ns);
                 } else {
-                    $out["{$service->name}Interface.php"] = $this->renderInterface($file, $service);
+                    $out[$this->path($file->package, "{$service->name}Interface")]
+                        = $this->renderInterface($file, $service, $ns);
                 }
             }
         }
@@ -101,32 +109,82 @@ final class ProtoGenerator
         return $out;
     }
 
-    private function renderEnum(string $class, EnumDescriptor $enum): string
+    /**
+     * The PHP namespace for a symbol of proto `$package`: the target template with
+     * `{client_name}` and `{package}` expanded (phase 90). No `{package}` → flat
+     * template (BC). `{package}` with the unnamed package collapses the segment.
+     */
+    private function namespaceFor(string $package): string
+    {
+        $ns = str_replace('{client_name}', $this->clientName, $this->namespace);
+        $pkgNs = Symbols::packageToNs($package);
+        if (str_contains($ns, '{package}')) {
+            $ns = $pkgNs === ''
+                ? str_replace(['\\{package}', '{package}'], '', $ns)
+                : str_replace('{package}', $pkgNs, $ns);
+        }
+
+        return trim($ns, '\\');
+    }
+
+    /** Output path (relative to the generated dir) for a class of `$package`. */
+    private function path(string $package, string $class): string
+    {
+        $sub = str_contains($this->namespace, '{package}')
+            ? str_replace('\\', '/', Symbols::packageToNs($package))
+            : '';
+
+        return ($sub === '' ? '' : "{$sub}/") . "{$class}.php";
+    }
+
+    /**
+     * The PHP reference to a message/enum from within `$currentNs` (phase 90):
+     * short name when the type shares the namespace, otherwise a leading-`\` FQN.
+     * Null when the type is not a generatable symbol (caller falls back to array).
+     */
+    private function typeRef(string $fqn, string $currentNs): ?string
+    {
+        $short = $this->symbols->className($fqn);
+        if ($short === null) {
+            return null;
+        }
+        $ns = $this->namespaceFor($this->symbols->package($fqn));
+        if ($ns === $currentNs) {
+            return $short;
+        }
+        return '\\' . ($ns === '' ? $short : "{$ns}\\{$short}");
+    }
+
+    private function renderEnum(string $class, EnumDescriptor $enum, string $ns): string
     {
         $cases = '';
         foreach ($enum->values as $value) {
             $cases .= "    case {$value->name} = {$value->number};\n";
         }
 
-        return $this->file(<<<PHP
+        return $this->file($ns, <<<PHP
             enum {$class}: int
             {
             {$cases}}
             PHP);
     }
 
-    private function renderMessage(string $class, MessageDescriptor $message): string
+    private function renderMessage(string $class, MessageDescriptor $message, string $ns): string
     {
+        // Cross-package field types resolve to a leading-`\` FQN, same-package to a
+        // short name (phase 90).
+        $refFor = fn (string $fqn): string => $this->typeRef($fqn, $ns) ?? '';
+
         $params = [];
         $docLines = [];
         $specs = [];
         foreach ($message->fields as $field) {
-            $type = $this->types->forField($field);
+            $type = $this->types->forField($field, $refFor);
             if ($type->doc !== null) {
                 $docLines[] = "     * @param {$type->doc} \${$field->name}";
             }
             $params[] = "        public {$type->declared} \${$field->name} = {$type->default},";
-            $specs[] = "        '{$field->name}' => {$this->fieldSpec($field)},";
+            $specs[] = "        '{$field->name}' => {$this->fieldSpec($field, $ns)},";
         }
 
         // FOLK_FIELDS drives the runtime Hydrator (array↔DTO); see
@@ -145,7 +203,7 @@ final class ProtoGenerator
         }
         $body .= ") {}";
 
-        return $this->file(<<<PHP
+        return $this->file($ns, <<<PHP
             final readonly class {$class}
             {
             {$body}
@@ -153,13 +211,13 @@ final class ProtoGenerator
             PHP);
     }
 
-    private function renderInterface(FileDescriptor $file, ServiceDescriptor $service): string
+    private function renderInterface(FileDescriptor $file, ServiceDescriptor $service, string $ns): string
     {
         $fqName = $file->package === '' ? $service->name : "{$file->package}.{$service->name}";
         $methods = '';
         foreach ($service->methods as $method) {
-            $in = $this->symbols->className($method->inputType) ?? 'array';
-            $out = $this->symbols->className($method->outputType) ?? 'array';
+            $in = $this->typeRef($method->inputType, $ns) ?? 'array';
+            $out = $this->typeRef($method->outputType, $ns) ?? 'array';
 
             // Server-streaming (phase 88b, #32): the handler yields response DTOs;
             // the WorkerLoop frames each. One request in, a stream of `$out` out.
@@ -187,6 +245,7 @@ final class ProtoGenerator
         $body = "    public const NAME = '{$fqName}';\n\n{$methods}";
 
         return $this->file(
+            $ns,
             <<<PHP
             interface {$service->name}Interface extends ServiceInterface
             {
@@ -203,7 +262,7 @@ final class ProtoGenerator
      * the stub to a `[grpc.clients.<name>]` entry; `SERVICE` is the proto service
      * FQN. Streaming methods are skipped (unary only in phase 88; streaming → #32).
      */
-    private function renderClient(FileDescriptor $file, ServiceDescriptor $service): string
+    private function renderClient(FileDescriptor $file, ServiceDescriptor $service, string $ns): string
     {
         $fqName = $file->package === '' ? $service->name : "{$file->package}.{$service->name}";
 
@@ -222,11 +281,11 @@ final class ProtoGenerator
         $methods = '';
         foreach ($service->methods as $method) {
             if ($method->clientStreaming || $method->serverStreaming) {
-                $methods .= $this->renderClientStreamMethod($method);
+                $methods .= $this->renderClientStreamMethod($method, $ns);
                 continue;
             }
-            $in = $this->symbols->className($method->inputType);
-            $out = $this->symbols->className($method->outputType);
+            $in = $this->typeRef($method->inputType, $ns);
+            $out = $this->typeRef($method->outputType, $ns);
 
             if ($in !== null && $out !== null) {
                 // The common, fully-typed path: DTO in → DTO out.
@@ -260,6 +319,7 @@ final class ProtoGenerator
             . rtrim($methods, "\n") . "\n";
 
         return $this->file(
+            $ns,
             <<<PHP
             final class {$service->name}Client extends {$base}
             {
@@ -275,10 +335,10 @@ final class ProtoGenerator
      * (`iterable<In>` → `Out`), or bidi (`iterable<In>` → `iterable<Out>`). Falls
      * back to raw-array exchange when a message type is not a generatable DTO.
      */
-    private function renderClientStreamMethod(MethodDescriptor $method): string
+    private function renderClientStreamMethod(MethodDescriptor $method, string $ns): string
     {
-        $in = $this->symbols->className($method->inputType);
-        $out = $this->symbols->className($method->outputType);
+        $in = $this->typeRef($method->inputType, $ns);
+        $out = $this->typeRef($method->outputType, $ns);
         $name = $method->name;
         $typed = $in !== null && $out !== null;
 
@@ -370,7 +430,7 @@ final class ProtoGenerator
      * {@see \Folk\Sdk\Grpc\Hydrator} interprets. Repeated wraps `['r', <elem>]`,
      * map wraps `['map', <value>]` (proto map keys are always scalar).
      */
-    private function fieldSpec(FieldDescriptor $field): string
+    private function fieldSpec(FieldDescriptor $field, string $ns): string
     {
         if ($field->isRepeated()) {
             if ($field->type === ProtoType::TYPE_MESSAGE && $this->symbols->isMapEntry($field->typeName)) {
@@ -379,24 +439,26 @@ final class ProtoGenerator
                 if ($entry !== null) {
                     foreach ($entry->fields as $entryField) {
                         if ($entryField->number === 2) {
-                            $valueSpec = $this->singularSpec($entryField);
+                            $valueSpec = $this->singularSpec($entryField, $ns);
                         }
                     }
                 }
                 return "['map', {$valueSpec}]";
             }
-            return "['r', {$this->singularSpec($field)}]";
+            return "['r', {$this->singularSpec($field, $ns)}]";
         }
-        return $this->singularSpec($field);
+        return $this->singularSpec($field, $ns);
     }
 
     /** The singular (label-stripped) spec literal for a field. */
-    private function singularSpec(FieldDescriptor $field): string
+    private function singularSpec(FieldDescriptor $field, string $ns): string
     {
         return match ($field->type) {
-            ProtoType::TYPE_MESSAGE => $this->messageSpec($field->typeName),
-            ProtoType::TYPE_ENUM => ($class = $this->symbols->className($field->typeName)) !== null
-                ? "['e', {$class}::class]"
+            ProtoType::TYPE_MESSAGE => $this->messageSpec($field->typeName, $ns),
+            // `::class` must be a leading-`\` FQN for a cross-package enum, else the
+            // Hydrator would resolve it against the current namespace (phase 90).
+            ProtoType::TYPE_ENUM => ($ref = $this->typeRef($field->typeName, $ns)) !== null
+                ? "['e', {$ref}::class]"
                 : "['s']",
             ProtoType::TYPE_BYTES => "['b']",
             default => "['s']",
@@ -404,7 +466,7 @@ final class ProtoGenerator
     }
 
     /** Spec literal for a message-typed field (well-known aware). */
-    private function messageSpec(string $typeName): string
+    private function messageSpec(string $typeName, string $ns): string
     {
         if (in_array($typeName, self::DYNAMIC_WELL_KNOWN, true)) {
             return "['d']";
@@ -412,8 +474,8 @@ final class ProtoGenerator
         if (in_array($typeName, self::SCALAR_WELL_KNOWN, true)) {
             return "['s']";
         }
-        $class = $this->symbols->className($typeName);
-        return $class !== null ? "['m', {$class}::class]" : "['d']";
+        $ref = $this->typeRef($typeName, $ns);
+        return $ref !== null ? "['m', {$ref}::class]" : "['d']";
     }
 
     /**
@@ -422,13 +484,13 @@ final class ProtoGenerator
      *
      * @param list<string> $uses
      */
-    private function file(string $body, array $uses = []): string
+    private function file(string $namespace, string $body, array $uses = []): string
     {
         $useBlock = $uses === [] ? '' : implode("\n", $uses) . "\n\n";
         return "<?php\n\n"
             . "declare(strict_types=1);\n\n"
             . self::HEADER . "\n\n"
-            . "namespace {$this->namespace};\n\n"
+            . "namespace {$namespace};\n\n"
             . $useBlock
             . $body . "\n";
     }

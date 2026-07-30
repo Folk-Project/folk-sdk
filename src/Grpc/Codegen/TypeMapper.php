@@ -15,10 +15,28 @@ use Folk\Sdk\Grpc\Codegen\Descriptor\FieldDescriptor;
  */
 final class TypeMapper
 {
+    /**
+     * Resolver for a message/enum type reference (phase 90): `(string $fqn):
+     * string` returns the PHP name to write in a signature — a short class name
+     * when the type is in the same namespace as the class being rendered, or a
+     * leading-`\` FQN when it lives in another package's namespace. Set per
+     * {@see forField} call. Null falls back to the flat short name (BC).
+     *
+     * @var (callable(string): string)|null
+     */
+    private $refFor = null;
+
     public function __construct(private readonly Symbols $symbols) {}
 
-    public function forField(FieldDescriptor $field): PhpType
+    /**
+     * @param (callable(string): string)|null $refFor phase-90 cross-package type
+     *        reference resolver (see {@see $refFor}); null keeps flat short names.
+     */
+    public function forField(FieldDescriptor $field, ?callable $refFor = null): PhpType
     {
+        $this->refFor = $refFor;
+
+
         if ($field->isRepeated()) {
             // map<K,V> is a repeated synthetic entry message.
             if ($field->type === ProtoType::TYPE_MESSAGE && $this->symbols->isMapEntry($field->typeName)) {
@@ -62,6 +80,19 @@ final class TypeMapper
     }
 
     /**
+     * The PHP reference for a message/enum type: short name (same namespace) or a
+     * leading-`\` FQN (another package's namespace), via the phase-90 resolver.
+     * Falls back to the flat short name when no resolver is set (BC).
+     */
+    private function ref(string $typeName): string
+    {
+        if ($this->refFor !== null) {
+            return ($this->refFor)($typeName);
+        }
+        return $this->symbols->className($typeName) ?? '';
+    }
+
+    /**
      * @return array{php: string, doc: string}
      */
     private function messageElement(string $typeName): array
@@ -70,12 +101,12 @@ final class TypeMapper
         if ($wellKnown !== null) {
             return $wellKnown;
         }
-        $class = $this->symbols->className($typeName);
-        if ($class === null) {
+        if ($this->symbols->className($typeName) === null) {
             // Unknown message type (not in the pool) — fall back to a loose array.
             return ['php' => 'array', 'doc' => 'array<string, mixed>'];
         }
-        return ['php' => $class, 'doc' => $class];
+        $ref = $this->ref($typeName);
+        return ['php' => $ref, 'doc' => $ref];
     }
 
     /**
@@ -83,9 +114,11 @@ final class TypeMapper
      */
     private function enumElement(string $typeName): array
     {
-        $class = $this->symbols->className($typeName);
-        $class ??= 'int';
-        return ['php' => $class, 'doc' => $class];
+        if ($this->symbols->className($typeName) === null) {
+            return ['php' => 'int', 'doc' => 'int'];
+        }
+        $ref = $this->ref($typeName);
+        return ['php' => $ref, 'doc' => $ref];
     }
 
     /**
@@ -115,8 +148,7 @@ final class TypeMapper
     private function enumZeroDefault(FieldDescriptor $field): string
     {
         $enum = $this->symbols->enum($field->typeName);
-        $class = $this->symbols->className($field->typeName);
-        if ($enum === null || $class === null) {
+        if ($enum === null || $this->symbols->className($field->typeName) === null) {
             return '0';
         }
         $zero = null;
@@ -127,6 +159,8 @@ final class TypeMapper
             }
         }
         $zero ??= $enum->values[0]->name ?? null;
+        // Cross-package enum default → leading-`\` FQN::Case (phase 90).
+        $class = $this->ref($field->typeName);
         return $zero === null ? '0' : "{$class}::{$zero}";
     }
 

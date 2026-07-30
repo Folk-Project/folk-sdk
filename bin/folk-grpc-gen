@@ -99,7 +99,9 @@ function folk_grpc_gen_usage(): string
 {
     return "usage: folk-grpc-gen --out <dir> --namespace <ns> [--client <name>] <file.proto> [<file.proto> …]\n"
         . "  (default) server role: emits {Service}Interface\n"
-        . "  --client <name>:       emits {Service}Client bound to [grpc.clients.<name>]\n";
+        . "  --client <name>:       emits {Service}Client bound to [grpc.clients.<name>]\n"
+        . "  --namespace / --out placeholders (phase 90): {package} nests classes by proto\n"
+        . "    package (e.g. 'App\\Grpc\\Generated\\Server\\{package}'); {client_name} = --client name.\n";
 }
 
 exit(folk_grpc_gen_main($argv));

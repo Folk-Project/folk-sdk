@@ -22,6 +22,13 @@ namespace {
      */
     function folk_grpc_yield(string $message_json): void {}
 
+    /**
+     * Receive the next message in a gRPC client-streaming / bidi request (phase 94,
+     * #92). Returns the JSON-encoded next inbound message, or null at end-of-stream.
+     * Read-side mirror of folk_grpc_yield; present only with the gRPC plugin.
+     */
+    function folk_grpc_recv(): ?string {}
+
     // gRPC streaming client bridge (phase 88b, #32). Present only when the build
     // includes the gRPC plugin. Handle-based blocking stream over `folk_stream_*`.
     function folk_stream_open(string $method, string $payload): int {}

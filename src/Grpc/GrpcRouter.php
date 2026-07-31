@@ -58,10 +58,22 @@ final class GrpcRouter implements GrpcModeHandler
      * frames every value as a gRPC message and reads the trailing business status
      * only after the stream drains (so a status set mid-stream is honoured).
      *
+     * Client-streaming / bidi (phase 94, #92): `method(iterable $requests, Context
+     * $context)` — the handler consumes a stream of inbound request DTOs. We hydrate
+     * each inbound message (its DTO class comes from the interface's `INPUT_STREAMS`
+     * map) and pass `iterable $requests`. Client-streaming returns a single DTO
+     * (framed like unary); bidi returns a `Traversable` of DTOs (framed like
+     * server-streaming).
+     *
      * @return array{__message: array<string, mixed>}|\Generator<int, array<string, mixed>>|null
      */
     private function callTranscoded(object $handler, GrpcRequest $request): array|\Traversable|null
     {
+        // Inbound-streaming: the request arrives as a stream, not a single message.
+        if ($request->requests !== null) {
+            return $this->callInboundStreaming($handler, $request, $request->requests);
+        }
+
         $ref = new \ReflectionMethod($handler, $request->method);
         $dtoClass = $this->requestDtoClass($ref);
 
@@ -110,6 +122,89 @@ final class GrpcRouter implements GrpcModeHandler
             }
             yield $this->hydrator->dehydrate($dto);
         }
+    }
+
+    /**
+     * Client-streaming / bidi (phase 94, #92): invoke `method(iterable $requests,
+     * Context $context)`. Each inbound message is hydrated into the method's request
+     * DTO (resolved from the interface's `INPUT_STREAMS` map); a null class falls
+     * back to passing the raw decoded arrays. Client-streaming returns a single DTO
+     * → `['__message' => …]`; bidi returns a `Traversable<DTO>` → a dehydrating
+     * generator the WorkerLoop frames per message.
+     *
+     * @param iterable<array<string,mixed>> $rawRequests
+     * @return array{__message: array<string, mixed>}|\Generator<int, array<string, mixed>>|null
+     */
+    private function callInboundStreaming(
+        object $handler,
+        GrpcRequest $request,
+        iterable $rawRequests,
+    ): array|\Traversable|null {
+        $dtoClass = $this->streamInputDtoClass($handler, $request->method);
+        $requests = $this->hydrateStream($rawRequests, $dtoClass);
+
+        /** @var mixed $result */
+        $result = $handler->{$request->method}($requests, $request->context);
+
+        // Bidi: the handler returned an iterable of response DTOs (status read after
+        // the stream drains, as with server-streaming).
+        if ($result instanceof \Traversable) {
+            return $this->dehydrateStream($result);
+        }
+
+        // Client-streaming: a single response DTO (or a business status).
+        if ($request->context->getStatus() !== null) {
+            return null;
+        }
+        if (!is_object($result)) {
+            throw new \RuntimeException(
+                "Client-streaming handler {$request->service}/{$request->method} must return a DTO",
+            );
+        }
+
+        return ['__message' => $this->hydrator->dehydrate($result)];
+    }
+
+    /**
+     * Hydrate a stream of decoded request arrays into request DTOs. With no DTO
+     * class (an unmapped input type) the raw arrays pass through unchanged.
+     *
+     * @param iterable<array<string,mixed>> $rawRequests
+     * @param class-string|null             $dtoClass
+     * @return \Generator<int, object|array<string,mixed>>
+     */
+    private function hydrateStream(iterable $rawRequests, ?string $dtoClass): \Generator
+    {
+        foreach ($rawRequests as $message) {
+            yield $dtoClass !== null
+                ? $this->hydrator->hydrate($dtoClass, $message)
+                : $message;
+        }
+    }
+
+    /**
+     * The request DTO class for an inbound-streaming method, read from the
+     * generated interface's `INPUT_STREAMS` map (`method => Dto::class`). The
+     * `iterable $requests` parameter carries no element type at runtime, so the
+     * map is the source of truth. Null → not mapped (raw arrays).
+     *
+     * @return class-string|null
+     */
+    private function streamInputDtoClass(object $handler, string $method): ?string
+    {
+        $sources = array_merge([$handler::class], array_values(class_implements($handler) ?: []));
+        foreach ($sources as $source) {
+            if (!defined("{$source}::INPUT_STREAMS")) {
+                continue;
+            }
+            /** @var mixed $map */
+            $map = constant("{$source}::INPUT_STREAMS");
+            if (is_array($map) && isset($map[$method]) && is_string($map[$method]) && class_exists($map[$method])) {
+                /** @var class-string */
+                return $map[$method];
+            }
+        }
+        return null;
     }
 
     /**

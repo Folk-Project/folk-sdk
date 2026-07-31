@@ -61,7 +61,23 @@ final class WorkerLoop implements HandlerLoop
     public function registerGrpcHandler(GrpcModeHandler $handler): void
     {
         $this->register('grpc.call', function (mixed $params) use ($handler): mixed {
-            $request  = GrpcRequest::fromPayload($params);
+            // Client-streaming / bidi (phase 94, #92): the plugin marks the call
+            // and streams inbound messages instead of embedding one. Build the
+            // handler's inbound iterable by pulling JSON messages off
+            // `folk_grpc_recv` until the client half-closes (null). Lazy — nothing
+            // is pulled until the handler iterates `$request->requests`.
+            $requests = null;
+            if (is_array($params) && ($params['client_streaming'] ?? false) === true) {
+                $requests = (static function (): \Generator {
+                    while (($json = Folk::grpcRecv()) !== null) {
+                        /** @var mixed $decoded */
+                        $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+                        yield is_array($decoded) ? $decoded : [];
+                    }
+                })();
+            }
+
+            $request  = GrpcRequest::fromPayload($params, $requests);
             $response = $handler->call($request);
 
             // Server-streaming (phase 88b, #32): the handler returns a Traversable

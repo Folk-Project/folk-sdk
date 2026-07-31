@@ -9,6 +9,31 @@ use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/Fixtures/dto.php';
 
+/**
+ * Client-streaming service (phase 94, #92): a stream of requests, one response.
+ * `INPUT_STREAMS` tells the router which DTO to hydrate each inbound message into
+ * (the `iterable` param carries no element type at runtime).
+ */
+interface InboundCollectSvc
+{
+    public const INPUT_STREAMS = ['Collect' => Everything::class];
+
+    /** @param iterable<Everything> $requests */
+    public function Collect(iterable $requests, Context $context): ?Everything;
+}
+
+/** Bidi service (phase 94, #92): a stream of requests, a stream of responses. */
+interface InboundChatSvc
+{
+    public const INPUT_STREAMS = ['Chat' => Everything::class];
+
+    /**
+     * @param  iterable<Everything> $requests
+     * @return iterable<Everything>
+     */
+    public function Chat(iterable $requests, Context $context): iterable;
+}
+
 final class GrpcRouterTest extends TestCase
 {
     /**
@@ -204,5 +229,112 @@ final class GrpcRouterTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $router->call(GrpcRequest::fromPayload(['service' => 's.Svc', 'method' => 'Missing', 'metadata' => []]));
+    }
+
+    /**
+     * Client-streaming (phase 94, #92): the router hydrates each inbound message
+     * into the method's request DTO (resolved from INPUT_STREAMS) and passes an
+     * `iterable $requests`; the single response DTO is framed under `__message`.
+     */
+    public function testClientStreamingHydratesInboundAndReturnsSingle(): void
+    {
+        $handler = new class implements InboundCollectSvc {
+            public function Collect(iterable $requests, Context $context): ?Everything
+            {
+                $names = [];
+                foreach ($requests as $req) {
+                    // $req is typed Everything via `@param iterable<Everything>` —
+                    // property access type-checks at phpstan L8 (proves autocomplete).
+                    $names[] = $req->name;
+                }
+                return new Everything(name: implode(',', $names));
+            }
+        };
+        $router = new GrpcRouter();
+        $router->register('test.Svc', $handler);
+
+        $result = $router->call(GrpcRequest::fromPayload(
+            [
+                'service' => 'test.Svc',
+                'method' => 'Collect',
+                'encoding' => 'json',
+                'client_streaming' => true,
+                'metadata' => [],
+            ],
+            [['name' => 'a'], ['name' => 'b'], ['name' => 'c']],
+        ));
+
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('__message', $result);
+        $this->assertSame('a,b,c', $result['__message']['name']);
+    }
+
+    /**
+     * Bidi (phase 94, #92): the handler returns a generator of response DTOs; the
+     * router dehydrates each for the WorkerLoop to frame one gRPC message at a time.
+     */
+    public function testBidiEchoesHydratedInboundStream(): void
+    {
+        $handler = new class implements InboundChatSvc {
+            public function Chat(iterable $requests, Context $context): iterable
+            {
+                foreach ($requests as $req) {
+                    yield new Everything(name: 'echo:' . $req->name);
+                }
+            }
+        };
+        $router = new GrpcRouter();
+        $router->register('test.Svc', $handler);
+
+        $result = $router->call(GrpcRequest::fromPayload(
+            [
+                'service' => 'test.Svc',
+                'method' => 'Chat',
+                'encoding' => 'json',
+                'client_streaming' => true,
+                'metadata' => [],
+            ],
+            [['name' => 'x'], ['name' => 'y']],
+        ));
+
+        $this->assertInstanceOf(\Generator::class, $result);
+        /** @var \Generator<int, array<string, mixed>> $result */
+        $messages = iterator_to_array($result, false);
+        $this->assertCount(2, $messages);
+        $this->assertSame('echo:x', $messages[0]['name']);
+        $this->assertSame('echo:y', $messages[1]['name']);
+    }
+
+    /**
+     * Client-streaming business status: a status set while draining the inbound
+     * stream suppresses the response body (null), as on the unary tier.
+     */
+    public function testClientStreamingBusinessStatusReturnsNull(): void
+    {
+        $handler = new class implements InboundCollectSvc {
+            public function Collect(iterable $requests, Context $context): ?Everything
+            {
+                foreach ($requests as $req) {
+                    unset($req); // drain the inbound stream
+                }
+                $context->setStatus(7, 'denied');
+                return null;
+            }
+        };
+        $router = new GrpcRouter();
+        $router->register('test.Svc', $handler);
+
+        $result = $router->call(GrpcRequest::fromPayload(
+            [
+                'service' => 'test.Svc',
+                'method' => 'Collect',
+                'encoding' => 'json',
+                'client_streaming' => true,
+                'metadata' => [],
+            ],
+            [['name' => 'a']],
+        ));
+
+        $this->assertNull($result);
     }
 }

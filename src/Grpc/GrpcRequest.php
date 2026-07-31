@@ -11,13 +11,18 @@ namespace Folk\Sdk\Grpc;
  *  - transcode (`encoding: "json"`): {@see $message} holds the decoded request as
  *    a native array; {@see $payload} is empty. The router hydrates it into a
  *    generated DTO.
+ *  - transcode client-streaming / bidi (phase 94, #92): {@see $requests} holds the
+ *    stream of inbound messages (each a decoded array); {@see $message} is null.
+ *    The router hydrates each into a DTO and passes `iterable $requests` to the
+ *    handler.
  *  - passthrough (default): {@see $payload} holds raw protobuf bytes; {@see
  *    $message} is null. The router hands the bytes to a legacy handler.
  */
 final readonly class GrpcRequest
 {
     /**
-     * @param array<string, mixed>|null $message decoded request (transcode), else null
+     * @param array<string, mixed>|null    $message  decoded request (unary transcode), else null
+     * @param iterable<array<string,mixed>>|null $requests inbound message stream (client-streaming/bidi), else null
      */
     public function __construct(
         public string $service,
@@ -26,9 +31,15 @@ final readonly class GrpcRequest
         public Context $context,
         public ?array $message = null,
         public bool $transcode = false,
+        public ?iterable $requests = null,
     ) {}
 
-    public static function fromPayload(mixed $payload): self
+    /**
+     * @param iterable<array<string,mixed>>|null $requests inbound message stream for a
+     *   client-streaming / bidi call (built by the WorkerLoop from `folk_grpc_recv`),
+     *   else null
+     */
+    public static function fromPayload(mixed $payload, ?iterable $requests = null): self
     {
         $data = is_array($payload) ? $payload : [];
 
@@ -48,6 +59,13 @@ final readonly class GrpcRequest
             ? $data['authority'] : null;
 
         $context = new Context($metadata, $service, $method, $requestId, $timeout, $peer, $authority);
+
+        // Transcode client-streaming / bidi (phase 94, #92): no single `message` —
+        // inbound messages arrive via `$requests`. The router builds the handler's
+        // `iterable $requests` from it.
+        if (($data['encoding'] ?? null) === 'json' && ($data['client_streaming'] ?? false) === true) {
+            return new self($service, $method, '', $context, null, true, $requests);
+        }
 
         // Transcode envelope: structured message + encoding flag.
         if (($data['encoding'] ?? null) === 'json' && array_key_exists('message', $data)) {

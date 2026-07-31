@@ -115,6 +115,24 @@ final class Folk
     }
 
     /**
+     * Receive the next message in a gRPC **client-streaming / bidi** request.
+     *
+     * Returns the JSON-encoded next inbound message, or null at end-of-stream
+     * (the client half-closed the request stream). Blocks until the next message
+     * arrives. Read-side mirror of {@see self::grpcYield()}.
+     *
+     * The {@see \Folk\Sdk\Worker\WorkerLoop} builds the handler's
+     * `iterable $requests` from repeated calls to this; application handlers
+     * iterate that generated iterable and never call this directly.
+     *
+     * Returns null without the Folk extension.
+     */
+    public static function grpcRecv(): ?string
+    {
+        return \function_exists('folk_grpc_recv') ? \folk_grpc_recv() : null;
+    }
+
+    /**
      * Read up to $length bytes of the streaming request body.
      *
      * Returns the next chunk of the request body, or an empty string at

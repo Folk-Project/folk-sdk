@@ -99,7 +99,7 @@ final class ProtoGeneratorStreamTest extends TestCase
         self::assertStringNotContainsString('GrpcStreamClient', $src);
     }
 
-    public function testServerInterfaceEmitsServerStreamingAndSkipsClientBidi(): void
+    public function testServerInterfaceEmitsAllFourMethodKinds(): void
     {
         $out = (new ProtoGenerator($this->streamFiles(), 'App\\Gen', ProtoGenerator::ROLE_SERVER, ''))
             ->generate();
@@ -120,18 +120,29 @@ final class ProtoGeneratorStreamTest extends TestCase
             $src,
         );
 
-        // Client-streaming and bidi server handlers are not supported in v1.
+        // Client-streaming (phase 94, #92): a stream of requests, one response.
+        self::assertStringContainsString('/** @param iterable<Req> $requests */', $src);
         self::assertStringContainsString(
-            'Upload: client-streaming/bidi server handler — not supported',
+            'public function Upload(iterable $requests, Context $context): ?Resp;',
+            $src,
+        );
+
+        // Bidi (phase 94, #92): a stream of requests, a stream of responses.
+        self::assertStringContainsString(
+            '/** @param iterable<Req> $requests @return iterable<Resp> */',
             $src,
         );
         self::assertStringContainsString(
-            'Chat: client-streaming/bidi server handler — not supported',
+            'public function Chat(iterable $requests, Context $context): iterable;',
             $src,
         );
-        // ...and they are NOT emitted as callable methods.
-        self::assertStringNotContainsString('public function Upload(', $src);
-        self::assertStringNotContainsString('public function Chat(', $src);
+
+        // The inbound-stream element DTOs are exposed for the router to hydrate
+        // (the `iterable` param carries no element type at runtime).
+        self::assertStringContainsString(
+            "public const INPUT_STREAMS = ['Upload' => Req::class, 'Chat' => Req::class];",
+            $src,
+        );
     }
 
     public function testGeneratedStreamStubIsSyntacticallyValidAndLoads(): void

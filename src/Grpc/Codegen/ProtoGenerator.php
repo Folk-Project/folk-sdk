@@ -215,6 +215,8 @@ final class ProtoGenerator
     {
         $fqName = $file->package === '' ? $service->name : "{$file->package}.{$service->name}";
         $methods = '';
+        /** @var array<string, string> $inputStreams method → inbound request DTO ref */
+        $inputStreams = [];
         foreach ($service->methods as $method) {
             $in = $this->typeRef($method->inputType, $ns) ?? 'array';
             $out = $this->typeRef($method->outputType, $ns) ?? 'array';
@@ -227,13 +229,24 @@ final class ProtoGenerator
                 continue;
             }
 
-            // Client-streaming / bidi on the SERVER are not supported in v1 (the
-            // server does not yet feed an inbound request stream to PHP). The
-            // client stub handles all three kinds; only the server half is limited.
-            // (Reaching here, server-streaming-only was already handled above, so a
-            // remaining streaming method is necessarily client-streaming or bidi.)
+            // Client-streaming / bidi on the SERVER (phase 94, #92): the handler
+            // consumes an `iterable $requests` of inbound DTOs. Its element type is
+            // recorded in INPUT_STREAMS (the `iterable` param carries no type at
+            // runtime, so the router reads the map to hydrate each message).
             if ($method->clientStreaming) {
-                $methods .= "    // {$method->name}: client-streaming/bidi server handler — not supported (v1; server → later)\n";
+                if ($in !== 'array') {
+                    $inputStreams[$method->name] = $in;
+                }
+                if ($method->serverStreaming) {
+                    // Bidi: a stream of requests, a stream of responses.
+                    $methods .= "    /** @param iterable<{$in}> \$requests @return iterable<{$out}> */\n";
+                    $methods .= "    public function {$method->name}(iterable \$requests, Context \$context): iterable;\n";
+                } else {
+                    // Client-streaming: a stream of requests, one response (nullable
+                    // for a business status set via $context->setStatus()).
+                    $methods .= "    /** @param iterable<{$in}> \$requests */\n";
+                    $methods .= "    public function {$method->name}(iterable \$requests, Context \$context): ?{$out};\n";
+                }
                 continue;
             }
 
@@ -242,7 +255,16 @@ final class ProtoGenerator
             $methods .= "    public function {$method->name}({$in} \$request, Context \$context): ?{$out};\n";
         }
 
-        $body = "    public const NAME = '{$fqName}';\n\n{$methods}";
+        $streamConst = '';
+        if ($inputStreams !== []) {
+            $entries = [];
+            foreach ($inputStreams as $name => $dto) {
+                $entries[] = "'{$name}' => {$dto}::class";
+            }
+            $streamConst = "    public const INPUT_STREAMS = [" . implode(', ', $entries) . "];\n\n";
+        }
+
+        $body = "    public const NAME = '{$fqName}';\n\n{$streamConst}{$methods}";
 
         return $this->file(
             $ns,

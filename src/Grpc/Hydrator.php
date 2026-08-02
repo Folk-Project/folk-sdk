@@ -6,7 +6,8 @@ namespace Folk\Sdk\Grpc;
 
 /**
  * Converts between the transcoded native array the Rust plugin exchanges and the
- * generated readonly DTOs (phase 87). No protoc, no protobuf runtime — the
+ * generated DTOs (phase 87; private fields + get/set accessors since phase 96).
+ * No protoc, no protobuf runtime — the
  * mapping is driven entirely by the `FOLK_FIELDS` constant {@see ProtoGenerator}
  * emits on every message DTO.
  *
@@ -24,6 +25,14 @@ namespace Folk\Sdk\Grpc;
  */
 final class Hydrator
 {
+    /**
+     * Cache of `ReflectionProperty` per `class::field`, so dehydrate reads private
+     * DTO fields (phase 96) without rebuilding reflection on every message.
+     *
+     * @var array<string, \ReflectionProperty>
+     */
+    private array $propCache = [];
+
     /**
      * Build a DTO of `$class` from the transcoded request array. Absent keys keep
      * their constructor default (unset proto3 singular → zero, message/oneof →
@@ -65,7 +74,7 @@ final class Hydrator
         $out = [];
         foreach ($fields as $name => $spec) {
             /** @var mixed $value */
-            $value = $dto->{$name} ?? null;
+            $value = $this->readField($dto, $name);
             if ($value === null) {
                 continue;
             }
@@ -73,6 +82,30 @@ final class Hydrator
         }
 
         return $out;
+    }
+
+    /**
+     * Read a generated DTO's field value by its proto field name (phase 96). DTO
+     * fields are private; the field name equals the proto/FOLK_FIELDS key, so the
+     * bridge reads it directly by reflection and stays decoupled from the accessor
+     * naming convention. A missing/inaccessible field reads as null.
+     */
+    private function readField(object $dto, string $name): mixed
+    {
+        $key = $dto::class . '::' . $name;
+        $prop = $this->propCache[$key] ?? null;
+        if ($prop === null) {
+            if (!property_exists($dto, $name)) {
+                return null;
+            }
+            $prop = new \ReflectionProperty($dto, $name);
+            $this->propCache[$key] = $prop;
+        }
+        if (!$prop->isInitialized($dto)) {
+            return null;
+        }
+
+        return $prop->getValue($dto);
     }
 
     /**

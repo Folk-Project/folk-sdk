@@ -17,15 +17,27 @@ enum Color: int
     case BLUE = 3;
 }
 
-final readonly class Inner
+final class Inner
 {
     /** @var array<string, list<mixed>> */
     public const FOLK_FIELDS = ['label' => ['s']];
 
-    public function __construct(public string $label = '') {}
+    public function __construct(private string $label = '') {}
+
+    public function getLabel(): string
+    {
+        return $this->label;
+    }
+
+    public function setLabel(string $value): self
+    {
+        $this->label = $value;
+
+        return $this;
+    }
 }
 
-final readonly class Everything
+final class Everything
 {
     /** @var array<string, list<mixed>> */
     public const FOLK_FIELDS = [
@@ -49,17 +61,167 @@ final readonly class Everything
      * @param array<string, mixed> $extra
      */
     public function __construct(
-        public string $name = '',
-        public int $big = 0,
-        public bool $flag = false,
-        public string $blob = '',
-        public Color $color = Color::COLOR_UNSPECIFIED,
-        public array $tags = [],
-        public array $counts = [],
-        public ?Inner $inner = null,
-        public ?string $maybe = null,
-        public ?string $text = null,
-        public ?int $number = null,
-        public array $extra = [],
+        private string $name = '',
+        private int $big = 0,
+        private bool $flag = false,
+        private string $blob = '',
+        private Color $color = Color::COLOR_UNSPECIFIED,
+        private array $tags = [],
+        private array $counts = [],
+        private ?Inner $inner = null,
+        private ?string $maybe = null,
+        private ?string $text = null,
+        private ?int $number = null,
+        private array $extra = [],
     ) {}
+
+    public function getName(): string
+    {
+        return $this->name;
+    }
+
+    public function setName(string $value): self
+    {
+        $this->name = $value;
+
+        return $this;
+    }
+
+    public function getBig(): int
+    {
+        return $this->big;
+    }
+
+    public function setBig(int $value): self
+    {
+        $this->big = $value;
+
+        return $this;
+    }
+
+    public function getFlag(): bool
+    {
+        return $this->flag;
+    }
+
+    public function setFlag(bool $value): self
+    {
+        $this->flag = $value;
+
+        return $this;
+    }
+
+    public function getBlob(): string
+    {
+        return $this->blob;
+    }
+
+    public function setBlob(string $value): self
+    {
+        $this->blob = $value;
+
+        return $this;
+    }
+
+    public function getColor(): Color
+    {
+        return $this->color;
+    }
+
+    public function setColor(Color $value): self
+    {
+        $this->color = $value;
+
+        return $this;
+    }
+
+    /** @return list<string> */
+    public function getTags(): array
+    {
+        return $this->tags;
+    }
+
+    /** @param list<string> $value */
+    public function setTags(array $value): self
+    {
+        $this->tags = $value;
+
+        return $this;
+    }
+
+    /** @return array<string, int> */
+    public function getCounts(): array
+    {
+        return $this->counts;
+    }
+
+    /** @param array<string, int> $value */
+    public function setCounts(array $value): self
+    {
+        $this->counts = $value;
+
+        return $this;
+    }
+
+    public function getInner(): ?Inner
+    {
+        return $this->inner;
+    }
+
+    public function setInner(?Inner $value): self
+    {
+        $this->inner = $value;
+
+        return $this;
+    }
+
+    public function getMaybe(): ?string
+    {
+        return $this->maybe;
+    }
+
+    public function setMaybe(?string $value): self
+    {
+        $this->maybe = $value;
+
+        return $this;
+    }
+
+    public function getText(): ?string
+    {
+        return $this->text;
+    }
+
+    public function setText(?string $value): self
+    {
+        $this->text = $value;
+
+        return $this;
+    }
+
+    public function getNumber(): ?int
+    {
+        return $this->number;
+    }
+
+    public function setNumber(?int $value): self
+    {
+        $this->number = $value;
+
+        return $this;
+    }
+
+    /** @return array<string, mixed> */
+    public function getExtra(): array
+    {
+        return $this->extra;
+    }
+
+    /** @param array<string, mixed> $value */
+    public function setExtra(array $value): self
+    {
+        $this->extra = $value;
+
+        return $this;
+    }
 }

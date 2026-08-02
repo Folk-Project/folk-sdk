@@ -72,10 +72,10 @@ final class ProtoGeneratorClientTest extends TestCase
 
         /** @var GrpcClient $client */
         $client = new $clientClass(null, $transport);
-        /** @var object{name: string} $resp */
+        /** @var object $resp */
         $resp = $client->Echo(new $everything(name: 'hi'));
 
-        $this->assertSame('echoed', $resp->name);
+        $this->assertSame('echoed', $resp->getName());
         $this->assertIsArray($captured);
         $this->assertSame('grpc.client.call', $captured[0]);
         /** @var array<string, mixed> $env */

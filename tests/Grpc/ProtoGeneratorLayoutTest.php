@@ -86,10 +86,16 @@ final class ProtoGeneratorLayoutTest extends TestCase
         );
         // Cross-package field → leading-\ FQN; same-package field → short name.
         self::assertStringContainsString(
-            'public ?\\App\\Grpc\\Generated\\Server\\Io\\Altessa\\Type\\V1\\FileRef $file = null,',
+            'private ?\\App\\Grpc\\Generated\\Server\\Io\\Altessa\\Type\\V1\\FileRef $file = null,',
             $src,
         );
-        self::assertStringContainsString('public ?Meta $meta = null,', $src);
+        self::assertStringContainsString('private ?Meta $meta = null,', $src);
+        // Accessors reference the same cross-package FQN / short name.
+        self::assertStringContainsString(
+            'public function getFile(): ?\\App\\Grpc\\Generated\\Server\\Io\\Altessa\\Type\\V1\\FileRef',
+            $src,
+        );
+        self::assertStringContainsString('public function setMeta(?Meta $value): self', $src);
         // FOLK_FIELDS ::class references follow the same rule (Hydrator needs real FQNs).
         self::assertStringContainsString(
             "'file' => ['m', \\App\\Grpc\\Generated\\Server\\Io\\Altessa\\Type\\V1\\FileRef::class]",
@@ -150,9 +156,9 @@ final class ProtoGeneratorLayoutTest extends TestCase
         $dto = $hydrator->hydrate($serviceInfo, ['file' => ['uri' => 'gs://x'], 'meta' => ['name' => 'svc']]);
 
         self::assertInstanceOf($serviceInfo, $dto);
-        self::assertInstanceOf($fileRef, $dto->file, 'cross-package nested message hydrated via FQN ::class');
-        self::assertSame('gs://x', $dto->file->uri);
-        self::assertSame('svc', $dto->meta->name);
+        self::assertInstanceOf($fileRef, $dto->getFile(), 'cross-package nested message hydrated via FQN ::class');
+        self::assertSame('gs://x', $dto->getFile()->getUri());
+        self::assertSame('svc', $dto->getMeta()->getName());
 
         self::assertSame(
             ['file' => ['uri' => 'gs://x'], 'meta' => ['name' => 'svc']],
@@ -170,7 +176,7 @@ final class ProtoGeneratorLayoutTest extends TestCase
         self::assertArrayHasKey('FileRef.php', $out);
         $src = $out['ServiceInfo.php'];
         self::assertStringContainsString('namespace App\\Grpc\\Flat;', $src);
-        self::assertStringContainsString('public ?FileRef $file = null,', $src, 'flat: short ref, no FQN');
+        self::assertStringContainsString('private ?FileRef $file = null,', $src, 'flat: short ref, no FQN');
         self::assertStringNotContainsString('\\App\\Grpc\\Flat\\FileRef', $src);
     }
 }

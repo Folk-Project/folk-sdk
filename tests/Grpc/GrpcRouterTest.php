@@ -46,7 +46,7 @@ final class GrpcRouterTest extends TestCase
         $handler = new class {
             public function Echo(Everything $request, Context $context): Everything
             {
-                return new Everything(name: $request->name . '!', color: $request->color);
+                return new Everything(name: $request->getName() . '!', color: $request->getColor());
             }
         };
 
@@ -126,8 +126,8 @@ final class GrpcRouterTest extends TestCase
             /** @return \Generator<int, Everything> */
             public function Watch(Everything $request, Context $context): \Generator
             {
-                yield new Everything(name: $request->name . '-0');
-                yield new Everything(name: $request->name . '-1');
+                yield new Everything(name: $request->getName() . '-0');
+                yield new Everything(name: $request->getName() . '-1');
             }
         };
 
@@ -245,7 +245,7 @@ final class GrpcRouterTest extends TestCase
                 foreach ($requests as $req) {
                     // $req is typed Everything via `@param iterable<Everything>` —
                     // property access type-checks at phpstan L8 (proves autocomplete).
-                    $names[] = $req->name;
+                    $names[] = $req->getName();
                 }
                 return new Everything(name: implode(',', $names));
             }
@@ -279,7 +279,7 @@ final class GrpcRouterTest extends TestCase
             public function Chat(iterable $requests, Context $context): iterable
             {
                 foreach ($requests as $req) {
-                    yield new Everything(name: 'echo:' . $req->name);
+                    yield new Everything(name: 'echo:' . $req->getName());
                 }
             }
         };

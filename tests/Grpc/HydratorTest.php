@@ -41,14 +41,14 @@ final class HydratorTest extends TestCase
         $dto = $this->hydrator->hydrate(Everything::class, $wire);
 
         $this->assertInstanceOf(Everything::class, $dto);
-        $this->assertSame('bytes', $dto->blob, 'bytes decoded from base64');
-        $this->assertSame(Color::BLUE, $dto->color, 'enum int → case');
-        $this->assertInstanceOf(Inner::class, $dto->inner);
-        $this->assertSame('L', $dto->inner->label);
-        $this->assertSame(['a', 'b'], $dto->tags);
-        $this->assertSame(['x' => 1, 'y' => 2], $dto->counts);
-        $this->assertSame(['k' => 'v'], $dto->extra);
-        $this->assertNull($dto->number, 'inactive oneof branch stays null');
+        $this->assertSame('bytes', $dto->getBlob(), 'bytes decoded from base64');
+        $this->assertSame(Color::BLUE, $dto->getColor(), 'enum int → case');
+        $this->assertInstanceOf(Inner::class, $dto->getInner());
+        $this->assertSame('L', $dto->getInner()->getLabel());
+        $this->assertSame(['a', 'b'], $dto->getTags());
+        $this->assertSame(['x' => 1, 'y' => 2], $dto->getCounts());
+        $this->assertSame(['k' => 'v'], $dto->getExtra());
+        $this->assertNull($dto->getNumber(), 'inactive oneof branch stays null');
 
         $this->assertEquals($wire, $this->hydrator->dehydrate($dto), 'dehydrate reproduces the wire');
     }
@@ -56,17 +56,17 @@ final class HydratorTest extends TestCase
     public function testUnknownEnumFallsBackToZeroValue(): void
     {
         $dto = $this->hydrator->hydrate(Everything::class, ['color' => 999]);
-        $this->assertSame(Color::COLOR_UNSPECIFIED, $dto->color, 'unknown enum → zero, not an exception');
+        $this->assertSame(Color::COLOR_UNSPECIFIED, $dto->getColor(), 'unknown enum → zero, not an exception');
     }
 
     public function testAbsentFieldsKeepDefaultsAndPresenceOmitsNulls(): void
     {
         $dto = $this->hydrator->hydrate(Everything::class, ['name' => 'x']);
 
-        $this->assertSame('x', $dto->name);
-        $this->assertNull($dto->maybe, 'unset optional stays null');
-        $this->assertNull($dto->inner);
-        $this->assertSame([], $dto->tags);
+        $this->assertSame('x', $dto->getName());
+        $this->assertNull($dto->getMaybe(), 'unset optional stays null');
+        $this->assertNull($dto->getInner());
+        $this->assertSame([], $dto->getTags());
 
         $wire = $this->hydrator->dehydrate($dto);
         $this->assertArrayNotHasKey('maybe', $wire, 'null field omitted from the wire');
@@ -78,8 +78,8 @@ final class HydratorTest extends TestCase
     public function testOneofActiveBranchOnly(): void
     {
         $dto = $this->hydrator->hydrate(Everything::class, ['number' => 7]);
-        $this->assertSame(7, $dto->number);
-        $this->assertNull($dto->text);
+        $this->assertSame(7, $dto->getNumber());
+        $this->assertNull($dto->getText());
 
         $wire = $this->hydrator->dehydrate($dto);
         $this->assertSame(7, $wire['number']);
@@ -90,7 +90,7 @@ final class HydratorTest extends TestCase
     {
         $raw = "\x00\x01\x02\xff";
         $dto = $this->hydrator->hydrate(Everything::class, ['blob' => base64_encode($raw)]);
-        $this->assertSame($raw, $dto->blob, 'binary bytes decode losslessly');
+        $this->assertSame($raw, $dto->getBlob(), 'binary bytes decode losslessly');
         $this->assertSame(base64_encode($raw), $this->hydrator->dehydrate($dto)['blob']);
     }
 
@@ -100,8 +100,8 @@ final class HydratorTest extends TestCase
             'tags' => ['one', 'two', 'three'],
             'counts' => ['a' => 10, 'b' => 20],
         ]);
-        $this->assertSame(['one', 'two', 'three'], $dto->tags);
-        $this->assertSame(['a' => 10, 'b' => 20], $dto->counts);
+        $this->assertSame(['one', 'two', 'three'], $dto->getTags());
+        $this->assertSame(['a' => 10, 'b' => 20], $dto->getCounts());
 
         $wire = $this->hydrator->dehydrate($dto);
         $this->assertSame(['one', 'two', 'three'], $wire['tags']);
@@ -111,6 +111,6 @@ final class HydratorTest extends TestCase
     public function testClassWithoutFolkFieldsHydratesEmpty(): void
     {
         $dto = $this->hydrator->hydrate(Inner::class, ['label' => 'kept']);
-        $this->assertSame('kept', $dto->label);
+        $this->assertSame('kept', $dto->getLabel());
     }
 }

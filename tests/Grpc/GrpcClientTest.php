@@ -59,7 +59,7 @@ final class GrpcClientTest extends TestCase
         $resp = $client->Echo(new Inner('ping'));
 
         $this->assertInstanceOf(Inner::class, $resp);
-        $this->assertSame('pong', $resp->label);
+        $this->assertSame('pong', $resp->getLabel());
 
         $this->assertSame([['grpc.client.call', $this->calls[0][1]]], $this->calls);
         $env = $this->lastEnvelope();

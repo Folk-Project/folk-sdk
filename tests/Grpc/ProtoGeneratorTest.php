@@ -108,9 +108,41 @@ final class ProtoGeneratorTest extends TestCase
 
         $dto = $hydrator->hydrate($class, $wire);
         $this->assertInstanceOf($class, $dto);
-        $this->assertSame('raw', $dto->blob, 'bytes decoded in the generated DTO');
-        $this->assertSame(2, $dto->color->value, 'enum hydrated to a case');
+        $this->assertSame('raw', $dto->getBlob(), 'bytes decoded in the generated DTO');
+        $this->assertSame(2, $dto->getColor()->value, 'enum hydrated to a case');
 
         $this->assertEquals($wire, $hydrator->dehydrate($dto), 'generated DTO round-trips the wire');
+    }
+
+    public function testDtoUsesPrivateFieldsWithAccessors(): void
+    {
+        $src = self::$generated['Everything.php'];
+        $this->assertStringContainsString('final class Everything', $src, 'no longer readonly');
+        $this->assertStringNotContainsString('readonly class', $src);
+        $this->assertStringContainsString('private string $name', $src, 'fields are private');
+        $this->assertStringContainsString('public function getName(): string', $src);
+        $this->assertStringContainsString('public function setName(string $value): self', $src);
+        // snake_case → PascalCase accessor names.
+        $this->assertStringContainsString('public function getCreatedAt(', $src, 'created_at → getCreatedAt');
+    }
+
+    public function testGeneratedSettersChainAndConstructorStillTakesNamedArgs(): void
+    {
+        $class = self::NS . '\\Everything';
+
+        // Fluent setters mutate and return $this.
+        $built = (new $class())->setName('a')->setBig(7)->setFlag(true);
+        $this->assertInstanceOf($class, $built);
+        $this->assertSame('a', $built->getName());
+        $this->assertSame(7, $built->getBig());
+        $this->assertTrue($built->getFlag());
+
+        // The constructor still accepts named args (the Hydrator's build path).
+        $ctor = new $class(name: 'a', big: 7, flag: true);
+        $this->assertEquals(
+            (new Hydrator())->dehydrate($ctor),
+            (new Hydrator())->dehydrate($built),
+            'setter-built and constructor-built DTOs are equivalent on the wire',
+        );
     }
 }

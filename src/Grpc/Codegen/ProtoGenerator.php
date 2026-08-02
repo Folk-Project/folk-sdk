@@ -12,9 +12,16 @@ use Folk\Sdk\Grpc\Codegen\Descriptor\MethodDescriptor;
 use Folk\Sdk\Grpc\Codegen\Descriptor\ServiceDescriptor;
 
 /**
- * Generates plain, readonly PHP DTOs, int-backed enums, and — depending on the
- * role — either server `*Interface` contracts or client `*Client` stubs from a
- * `FileDescriptorSet`. No protoc, no protobuf runtime.
+ * Generates plain PHP DTOs (private fields + fluent get/set accessors),
+ * int-backed enums, and — depending on the role — either server `*Interface`
+ * contracts or client `*Client` stubs from a `FileDescriptorSet`. No protoc, no
+ * protobuf runtime.
+ *
+ * DTOs keep an all-optional constructor (named args map 1:1 to proto fields, so
+ * {@see \Folk\Sdk\Grpc\Hydrator::hydrate} builds them with `new $class(...$args)`)
+ * and expose `getX()`/`setX($v): self` per field for incremental, chainable
+ * building. Fields are `private`; the Hydrator reads them back by name via
+ * reflection on dehydrate (phase 96).
  *
  * DTO property names mirror the proto field names (snake_case), so they map 1:1
  * to the transcoded JSON the Rust plugin sends (`use_proto_field_name`). Every
@@ -178,13 +185,27 @@ final class ProtoGenerator
         $params = [];
         $docLines = [];
         $specs = [];
+        $accessors = [];
         foreach ($message->fields as $field) {
             $type = $this->types->forField($field, $refFor);
+            $name = $field->name;
+            $pascal = self::pascal($name);
             if ($type->doc !== null) {
-                $docLines[] = "     * @param {$type->doc} \${$field->name}";
+                $docLines[] = "     * @param {$type->doc} \${$name}";
             }
-            $params[] = "        public {$type->declared} \${$field->name} = {$type->default},";
-            $specs[] = "        '{$field->name}' => {$this->fieldSpec($field, $ns)},";
+            // Fields are private (phase 96): built via the constructor (named args)
+            // or the fluent setters; read via the getters (and by the Hydrator via
+            // reflection on the field name).
+            $params[] = "        private {$type->declared} \${$name} = {$type->default},";
+            $specs[] = "        '{$name}' => {$this->fieldSpec($field, $ns)},";
+
+            $getDoc = $type->doc !== null ? "    /** @return {$type->doc} */\n" : '';
+            $accessors[] = "{$getDoc}    public function get{$pascal}(): {$type->declared}\n"
+                . "    {\n        return \$this->{$name};\n    }";
+
+            $setDoc = $type->doc !== null ? "    /** @param {$type->doc} \$value */\n" : '';
+            $accessors[] = "{$setDoc}    public function set{$pascal}({$type->declared} \$value): self\n"
+                . "    {\n        \$this->{$name} = \$value;\n\n        return \$this;\n    }";
         }
 
         // FOLK_FIELDS drives the runtime Hydrator (array↔DTO); see
@@ -202,13 +223,22 @@ final class ProtoGenerator
             $body .= "\n" . implode("\n", $params) . "\n    ";
         }
         $body .= ") {}";
+        if ($accessors !== []) {
+            $body .= "\n\n" . implode("\n\n", $accessors);
+        }
 
         return $this->file($ns, <<<PHP
-            final readonly class {$class}
+            final class {$class}
             {
             {$body}
             }
             PHP);
+    }
+
+    /** proto snake_case field name → PascalCase accessor suffix (`first_name` → `FirstName`). */
+    private static function pascal(string $name): string
+    {
+        return str_replace(' ', '', ucwords(str_replace('_', ' ', $name)));
     }
 
     private function renderInterface(FileDescriptor $file, ServiceDescriptor $service, string $ns): string

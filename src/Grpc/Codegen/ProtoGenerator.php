@@ -186,10 +186,26 @@ final class ProtoGenerator
         $docLines = [];
         $specs = [];
         $accessors = [];
+        // PHP method names are case-insensitive, so two distinct proto fields whose
+        // PascalCase accessor suffixes differ only in case (e.g. `created_at` and
+        // `createdat` → `getCreatedAt`/`getCreatedat`) would emit two methods PHP
+        // treats as one → fatal "cannot redeclare". Catch it at generation time
+        // with a message naming both fields, rather than shipping a broken class.
+        $accessorBases = [];
         foreach ($message->fields as $field) {
             $type = $this->types->forField($field, $refFor);
             $name = $field->name;
             $pascal = self::pascal($name);
+            $key = strtolower($pascal);
+            if (isset($accessorBases[$key])) {
+                throw new \RuntimeException(
+                    "gRPC codegen: message '{$class}' fields '{$accessorBases[$key]}' and '{$name}' "
+                    . "both map to the accessor 'get{$pascal}'/'set{$pascal}'. PHP method names are "
+                    . 'case-insensitive, so the generated class cannot declare both. Rename one of the '
+                    . 'proto fields to disambiguate.',
+                );
+            }
+            $accessorBases[$key] = $name;
             if ($type->doc !== null) {
                 $docLines[] = "     * @param {$type->doc} \${$name}";
             }
